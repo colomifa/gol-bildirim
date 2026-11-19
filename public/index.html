@@ -2,130 +2,228 @@
 <html lang="tr">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Bildirim Kuralları</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Kural Paneli</title>
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
-  :root { --bg:#eef1ec; --card:#fff; --ink:#15231a; --mute:#5d6b61; --line:#cfd8cf; --pitch:#1d6b3b; --warn:#b3261e; color-scheme:light; }
-  @media (prefers-color-scheme: dark) {
-    :root { --bg:#101712; --card:#18221b; --ink:#e6eee8; --mute:#93a498; --line:#2c3a30; --pitch:#4cc27a; --warn:#ff8a80; color-scheme:dark; }
-  }
-  * { box-sizing:border-box; }
-  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 Barlow, system-ui, sans-serif; }
-  main { max-width:760px; margin:0 auto; padding:20px 14px 90px; }
-  h1 { font:700 34px/1 "Barlow Condensed", Impact, sans-serif; margin:8px 0 4px; }
-  .sub { color:var(--mute); margin:0 0 20px; }
-  .rule { background:var(--card); border:1px solid var(--line); border-left:6px solid var(--pitch); border-radius:6px; padding:14px; margin-bottom:14px; }
-  .rule.off { border-left-color:var(--line); opacity:.65; }
-  .head { display:flex; gap:10px; align-items:center; margin-bottom:10px; }
-  .head input[type=text] { flex:1; font:600 20px "Barlow Condensed", sans-serif; }
-  .cond { display:grid; grid-template-columns:1fr 70px 90px 36px; gap:6px; margin-bottom:6px; align-items:center; }
-  .and { color:var(--mute); font-size:13px; margin:0 0 6px 2px; }
-  select, input { font:inherit; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:9px 8px; min-width:0; width:100%; }
-  input[type=checkbox] { width:22px; height:22px; accent-color:var(--pitch); }
-  button { font:600 15px Barlow, sans-serif; border-radius:4px; border:1px solid var(--line); background:var(--card); color:var(--ink); padding:10px 14px; cursor:pointer; }
-  button.main { background:var(--pitch); border-color:var(--pitch); color:#fff; }
-  button.x { padding:8px; color:var(--warn); }
-  button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--pitch); outline-offset:1px; }
-  .sum { margin:10px 0 0; padding-top:10px; border-top:1px dashed var(--line); color:var(--mute); font-size:14px; }
-  .row { display:flex; gap:8px; justify-content:space-between; margin-top:10px; }
-  .bar { position:fixed; inset:auto 0 0 0; background:var(--card); border-top:1px solid var(--line); padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px)); display:flex; gap:8px; justify-content:center; }
-  .empty { padding:30px 10px; text-align:center; color:var(--mute); }
-  @media (max-width:520px) { .cond { grid-template-columns:1fr 1fr 36px; } .cond select:first-child { grid-column:1 / 4; } }
+:root{--bg:#0d1117;--p:#151b23;--p2:#1d2531;--line:#2a3444;--ink:#e8edf3;--mute:#8a97a8;--acc:#f5b83d;--live:#e5484d;--ok:#3ddc84;color-scheme:dark}
+*{box-sizing:border-box;margin:0}
+[hidden]{display:none!important}
+body{background:var(--bg);color:var(--ink);font:14px/1.35 "IBM Plex Sans",system-ui,sans-serif;padding-bottom:calc(70px + env(safe-area-inset-bottom,0px))}
+button{font:inherit;color:inherit;cursor:pointer;background:none;border:0}
+select,input{font:inherit;color:var(--ink);background:var(--p2);border:1px solid var(--line);border-radius:4px;padding:7px 8px;width:100%;min-width:0}
+:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
+.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
+header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:calc(8px + env(safe-area-inset-top,0px)) 12px 0}
+.w{max-width:640px;margin:0 auto}
+.top{display:flex;justify-content:space-between;align-items:center}
+h1{font:600 14px "IBM Plex Mono",monospace;letter-spacing:.06em;text-transform:uppercase}
+.st{font-size:12px;color:var(--mute);display:flex;align-items:center;gap:6px}
+#stt{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--mute);flex:none}.dot.ok{background:var(--ok)}
+nav{display:flex;margin-top:4px}
+nav button{flex:1;padding:9px 0;color:var(--mute);border-bottom:2px solid transparent;font-weight:500}
+nav button.on{color:var(--acc);border-color:var(--acc)}
+nav b{font:600 11px "IBM Plex Mono",monospace;background:var(--p2);border-radius:8px;padding:1px 6px;margin-left:4px}
+main{max-width:640px;margin:0 auto;padding:10px 12px}
+.empty{color:var(--mute);padding:28px 8px;text-align:center}
+#q{margin-bottom:6px}
+.m{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;padding:8px 2px;border-bottom:1px solid var(--line)}
+.min{font:600 12px "IBM Plex Mono",monospace;text-align:center;border-radius:3px;padding:4px 0;background:var(--p2);color:var(--mute)}
+.min.live{background:var(--live);color:#fff}
+.tm{display:flex;justify-content:space-between;gap:8px;min-width:0}
+.tm span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.tm b{font-weight:600}
+.add{display:flex;align-items:center;gap:4px;min-width:40px;height:34px;justify-content:center;border:1px solid var(--line);border-radius:5px;color:var(--acc);font-size:16px}
+.add i{font:600 11px "IBM Plex Mono",monospace;font-style:normal;background:var(--acc);color:#111;border-radius:8px;padding:0 5px}
+.r{background:var(--p);border:1px solid var(--line);border-radius:6px;margin-bottom:6px}
+.r.off .t{opacity:.5}
+.rh{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:8px 10px}
+.t{min-width:0;cursor:pointer}
+.n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.s{color:var(--mute);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chev{color:var(--mute);padding:4px 6px}
+.rb{padding:2px 10px 10px;border-top:1px solid var(--line)}
+.f{display:block;color:var(--mute);font-size:12px;margin:10px 0 4px}
+.c{display:grid;grid-template-columns:1fr 54px 66px 28px;gap:5px;margin-bottom:5px}
+.x{color:var(--live)}
+.ghost{border:1px solid var(--line);border-radius:5px;padding:8px 12px;color:var(--acc);margin-bottom:8px}
+.row{display:flex;justify-content:space-between;margin-top:8px}
+.sw{position:relative;width:34px;height:20px;flex:none}
+.sw input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;padding:0;cursor:pointer}
+.sw span{position:absolute;inset:0;background:var(--line);border-radius:10px;transition:.15s;pointer-events:none}
+.sw span::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.15s}
+.sw input:checked+span{background:var(--ok)}
+.sw input:checked+span::after{transform:translateX(14px)}
+.sw input:focus-visible+span{outline:2px solid var(--acc)}
+.bar{position:fixed;left:0;right:0;bottom:0;background:var(--p);border-top:1px solid var(--line);padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));display:flex;gap:8px;justify-content:center}
+.bar button{border:1px solid var(--line);border-radius:5px;padding:10px 18px;font-weight:600}
+.bar #save{background:var(--acc);border-color:var(--acc);color:#111}
+@media(max-width:420px){.c{grid-template-columns:1fr 1fr 28px}.c select:first-child{grid-column:1/-1}}
 </style>
 </head>
 <body>
+<header><div class="w">
+  <div class="top"><h1>Gol Paneli</h1><div class="st"><span class="dot" id="dot"></span><span id="stt">...</span></div></div>
+  <nav>
+    <button data-tab="m" class="on">Maçlar <b id="nm">0</b></button>
+    <button data-tab="r">Kurallar <b id="nr">0</b></button>
+  </nav>
+</div></header>
 <main>
-  <h1>Bildirim kuralları</h1>
-  <p class="sub">Bir kuraldaki tüm koşullar aynı anda doğru olunca Telegram'a mesaj gider. "Veya" için ayrı kural ekle.</p>
-  <div id="rules"></div>
-  <button id="add">Kural ekle</button>
+  <div id="pm"><input id="q" type="search" placeholder="Takım ara..."><div id="list"></div></div>
+  <div id="pr" hidden></div>
 </main>
-<div class="bar"><button class="main" id="save">Kaydet</button><button id="test">Test mesajı</button></div>
+<div class="bar"><button id="save">Kaydet</button><button id="test">Test mesajı</button></div>
 
 <script>
-const METRICS = [
-  ["Maç önü oranı", [["pre_home","Ev sahibi maç önü oranı"],["pre_draw","Beraberlik maç önü oranı"],["pre_away","Deplasman maç önü oranı"]]],
-  ["Canlı oran",    [["live_home","Ev sahibi canlı oran"],["live_draw","Beraberlik canlı oran"],["live_away","Deplasman canlı oran"]]],
-  ["Skor",          [["home_goals","Ev sahibi gol"],["away_goals","Deplasman gol"],["total_goals","Toplam gol"],["goal_diff","Gol farkı (ev - dep)"]]],
-  ["Şut",           [["home_shots","Ev sahibi şut"],["away_shots","Deplasman şut"],["home_sot","Ev sahibi isabetli şut"],["away_sot","Deplasman isabetli şut"]]],
-  ["xG",            [["home_xg","Ev sahibi xG"],["away_xg","Deplasman xG"],["total_xg","Toplam xG"]]],
-  ["Zaman",         [["minute","Maç dakikası"]]]
+const GROUPS=[
+ ["Maç önü oranı",[["pre_home","Ev"],["pre_draw","Beraberlik"],["pre_away","Deplasman"]]],
+ ["Canlı oran",[["live_home","Ev"],["live_draw","Beraberlik"],["live_away","Deplasman"]]],
+ ["Skor",[["home_goals","Ev gol"],["away_goals","Dep gol"],["total_goals","Toplam gol"],["goal_diff","Fark (ev-dep)"]]],
+ ["Şut",[["home_shots","Ev şut"],["away_shots","Dep şut"],["home_sot","Ev isabetli"],["away_sot","Dep isabetli"]]],
+ ["xG",[["home_xg","Ev"],["away_xg","Dep"],["total_xg","Toplam"]]],
+ ["Zaman",[["minute","Dakika"]]]
 ];
-const OPS = [[">=","≥"],[">","&gt;"],["<=","≤"],["<","&lt;"],["==","="]];
-const label = k => METRICS.flatMap(g => g[1]).find(m => m[0] === k)?.[1] || k;
-const opText = o => OPS.find(x => x[0] === o)[1].replace("&gt;",">").replace("&lt;","<");
+const LBL={};GROUPS.forEach(g=>g[1].forEach(m=>LBL[m[0]]=g[0]+" · "+m[1]));
+const OPV=[[">=","≥"],[">",">"],["<=","≤"],["<","<"],["==","="]];
 
-let rules = [];
-let pw = localStorage.getItem("pw") || prompt("Panel şifresi:");
-const H = () => ({ "Content-Type":"application/json", "x-password":pw });
-const uid = () => Math.random().toString(36).slice(2, 9);
-const newCond = () => ({ metric:"pre_home", op:">=", value:1.5 });
-const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const $=id=>document.getElementById(id);
+let rules=[],matches=[],updated=null,err="",tab="m",open=null,isDirty=false;
+let pw=localStorage.getItem("pw")||prompt("Panel şifresi:");
+const H=()=>({"Content-Type":"application/json","x-password":pw});
+const uid=()=>Math.random().toString(36).slice(2,9);
+const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const newCond=()=>({metric:"pre_home",op:">=",value:1.5});
+const opT=o=>(OPV.find(x=>x[0]===o)||[0,o])[1];
+const isLive=m=>!m.status&&Number(m.minute)>0;
+const same=(a,b)=>String(a)===String(b);
 
-function render() {
-  const box = document.getElementById("rules");
-  if (!rules.length) { box.innerHTML = '<div class="empty">Henüz kural yok. "Kural ekle" ile başla.</div>'; return; }
-  box.innerHTML = rules.map((r, i) => `
-    <div class="rule ${r.enabled ? "" : "off"}">
-      <div class="head">
-        <input type="checkbox" ${r.enabled ? "checked" : ""} data-i="${i}" data-f="enabled" aria-label="Kural açık">
-        <input type="text" value="${esc(r.name)}" data-i="${i}" data-f="name" aria-label="Kural adı">
-      </div>
-      ${r.conditions.map((c, j) => `
-        ${j ? '<p class="and">ve</p>' : ""}
-        <div class="cond">
-          <select data-i="${i}" data-j="${j}" data-f="metric">
-            ${METRICS.map(g => `<optgroup label="${g[0]}">${g[1].map(m => `<option value="${m[0]}" ${m[0]===c.metric?"selected":""}>${m[1]}</option>`).join("")}</optgroup>`).join("")}
-          </select>
-          <select data-i="${i}" data-j="${j}" data-f="op">
-            ${OPS.map(o => `<option value="${o[0]}" ${o[0]===c.op?"selected":""}>${o[1]}</option>`).join("")}
-          </select>
-          <input type="number" step="any" inputmode="decimal" value="${c.value}" data-i="${i}" data-j="${j}" data-f="value">
-          <button class="x" data-del="${i}.${j}" aria-label="Koşulu sil">✕</button>
-        </div>`).join("")}
-      <div class="row">
-        <button data-addc="${i}">Koşul ekle</button>
-        <button class="x" data-delr="${i}">Kuralı sil</button>
-      </div>
-      <p class="sum">${r.conditions.length ? r.conditions.map(c => `${label(c.metric)} ${opText(c.op)} ${c.value}`).join(" ve ") : "Koşul yok, bu kural çalışmaz."}</p>
-    </div>`).join("");
+function dirty(v){isDirty=v;$("save").textContent=v?"Kaydet •":"Kaydet"}
+window.onbeforeunload=()=>isDirty?"Kaydedilmemiş değişiklik var":undefined;
+
+function status(){
+  $("dot").className="dot"+(updated&&!err?" ok":"");
+  $("stt").textContent=err||(updated?new Date(updated).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"bekleniyor");
+  $("nm").textContent=matches.length;$("nr").textContent=rules.length;
 }
 
-document.addEventListener("input", e => {
-  const d = e.target.dataset; if (d.f === undefined) return;
-  const r = rules[d.i];
-  if (d.j !== undefined) r.conditions[d.j][d.f] = d.f === "value" ? parseFloat(e.target.value) : e.target.value;
-  else r[d.f] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
-  if (d.f === "enabled") render();
-  else if (d.f !== "name") { document.querySelectorAll(".sum")[d.i].textContent = r.conditions.map(c => `${label(c.metric)} ${opText(c.op)} ${c.value}`).join(" ve "); }
+function renderMatches(){
+  const q=$("q").value.trim().toLowerCase();
+  const L=matches.filter(m=>!q||(m.home+" "+m.away).toLowerCase().includes(q)).sort((a,b)=>isLive(b)-isLive(a));
+  $("list").innerHTML=L.length?L.map(m=>{
+    const n=rules.filter(r=>r.matchId&&same(r.matchId,m.id)).length,lv=isLive(m);
+    return `<div class="m">
+      <div class="min ${lv?"live":""}">${lv?esc(m.minute)+"'":esc(m.status||"–")}</div>
+      <div><div class="tm"><span>${esc(m.home)}</span><b class="mono">${esc(m.homeGoals==null?"-":m.homeGoals)}</b></div>
+      <div class="tm"><span>${esc(m.away)}</span><b class="mono">${esc(m.awayGoals==null?"-":m.awayGoals)}</b></div></div>
+      <button class="add" data-newm="${esc(m.id)}" aria-label="Bu maça kural ekle">${n?`<i>${n}</i>`:""}＋</button>
+    </div>`}).join(""):`<p class="empty">${matches.length?"Eşleşen maç yok.":"Maç verisi yok. Skor API'si bağlı mı?"}</p>`;
+}
+
+const target=r=>r.matchId?esc(r.matchLabel||("Maç "+r.matchId)):"Tüm maçlar";
+const sumText=r=>r.conditions.length?r.conditions.map(c=>`${LBL[c.metric]||c.metric} ${opT(c.op)} ${c.value}`).join(" ve "):"koşul yok";
+
+function body(r,i){
+  const missing=r.matchId&&!matches.some(m=>same(m.id,r.matchId));
+  const opts=`<option value="">Tüm maçlar</option>`
+    +(missing?`<option value="${esc(r.matchId)}" selected>${esc(r.matchLabel||r.matchId)} (listede yok)</option>`:"")
+    +matches.map(m=>`<option value="${esc(m.id)}" ${r.matchId&&same(m.id,r.matchId)?"selected":""}>${esc(m.home)} – ${esc(m.away)}${isLive(m)?` (${esc(m.minute)}')`:""}</option>`).join("");
+  return `<div class="rb">
+    <label class="f">Kural adı<input type="text" value="${esc(r.name)}" data-r="${i}" data-f="name"></label>
+    <label class="f">Çalışacağı maç<select data-r="${i}" data-f="target">${opts}</select></label>
+    <div class="f">Koşullar (hepsi doğru olunca bildirim gider)</div>
+    ${r.conditions.map((c,j)=>`<div class="c">
+      <select data-r="${i}" data-j="${j}" data-f="metric">${GROUPS.map(g=>`<optgroup label="${g[0]}">${g[1].map(m=>`<option value="${m[0]}" ${m[0]===c.metric?"selected":""}>${esc(LBL[m[0]])}</option>`).join("")}</optgroup>`).join("")}</select>
+      <select data-r="${i}" data-j="${j}" data-f="op">${OPV.map(o=>`<option value="${o[0]}" ${o[0]===c.op?"selected":""}>${esc(o[1])}</option>`).join("")}</select>
+      <input type="number" step="any" inputmode="decimal" value="${esc(c.value)}" data-r="${i}" data-j="${j}" data-f="value">
+      <button class="x" data-del="${i}.${j}" aria-label="Koşulu sil">✕</button>
+    </div>`).join("")}
+    <div class="row"><button class="ghost" data-addc="${i}">＋ Koşul</button><button class="x" data-delr="${i}">Kuralı sil</button></div>
+  </div>`;
+}
+
+function renderRules(){
+  const L=rules.map((r,i)=>{
+    const o=open===r.id;
+    return `<div class="r ${r.enabled?"":"off"}">
+      <div class="rh">
+        <label class="sw"><input type="checkbox" data-en="${i}" ${r.enabled?"checked":""} aria-label="Kural açık"><span></span></label>
+        <div class="t" data-open="${r.id}"><div class="n">${esc(r.name)||"İsimsiz"}</div><div class="s">${r.matchId?"⚽ ":""}${target(r)} · ${esc(sumText(r))}</div></div>
+        <button class="chev" data-open="${r.id}" aria-label="Aç/kapat">${o?"▾":"▸"}</button>
+      </div>${o?body(r,i):""}</div>`}).join("");
+  $("pr").innerHTML=`<button class="ghost" data-newall>＋ Tüm maçlar için kural</button>`+(L||`<p class="empty">Kural yok. Maçlar sekmesinden bir maç seç ya da yukarıdan ekle.</p>`);
+}
+
+function render(){
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===tab));
+  $("pm").hidden=tab!=="m";$("pr").hidden=tab!=="r";
+  tab==="m"?renderMatches():renderRules();
+  status();
+}
+
+function addRule(m){
+  const lbl=m?`${m.home} – ${m.away}`:"";
+  const r={id:uid(),name:m?lbl:"Yeni kural",enabled:true,matchId:m?String(m.id):null,matchLabel:lbl,conditions:[newCond()]};
+  rules.unshift(r);open=r.id;tab="r";dirty(true);render();window.scrollTo(0,0);
+}
+
+document.addEventListener("input",e=>{
+  const t=e.target,d=t.dataset;
+  if(d.en!==undefined){rules[d.en].enabled=t.checked;dirty(true);render();return}
+  if(d.r===undefined)return;
+  const r=rules[d.r];dirty(true);
+  if(d.j!==undefined){r.conditions[d.j][d.f]=d.f==="value"?parseFloat(t.value):t.value;return}
+  if(d.f==="target"){
+    const m=matches.find(x=>same(x.id,t.value));
+    const keep=t.value&&r.matchId&&same(r.matchId,t.value);
+    r.matchLabel=m?`${m.home} – ${m.away}`:(keep?r.matchLabel:"");
+    r.matchId=t.value||null;render();return;
+  }
+  r[d.f]=t.value;
 });
-document.addEventListener("click", e => {
-  const d = e.target.dataset;
-  if (d.addc) { rules[d.addc].conditions.push(newCond()); render(); }
-  if (d.del) { const [i, j] = d.del.split("."); rules[i].conditions.splice(j, 1); render(); }
-  if (d.delr && confirm("Bu kural silinsin mi?")) { rules.splice(d.delr, 1); render(); }
+document.addEventListener("click",e=>{
+  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr]");
+  if(!b)return;const d=b.dataset;
+  if(d.tab){tab=d.tab;render();return}
+  if(d.open){open=open===d.open?null:d.open;render();return}
+  if(d.newm!==undefined){addRule(matches.find(x=>same(x.id,d.newm))||null);return}
+  if(d.newall!==undefined){addRule(null);return}
+  if(d.addc!==undefined){rules[d.addc].conditions.push(newCond());dirty(true);render();return}
+  if(d.del){const[i,j]=d.del.split(".");rules[i].conditions.splice(j,1);dirty(true);render();return}
+  if(d.delr!==undefined&&confirm("Bu kural silinsin mi?")){rules.splice(d.delr,1);open=null;dirty(true);render()}
 });
-document.getElementById("add").onclick = () => {
-  rules.push({ id:uid(), name:"Yeni kural", enabled:true, conditions:[newCond()] }); render();
+$("q").oninput=renderMatches;
+
+$("save").onclick=async()=>{
+  const bad=rules.find(r=>r.conditions.some(c=>Number.isNaN(c.value)));
+  if(bad)return alert(`"${bad.name}" kuralında boş bir değer var.`);
+  const r=await fetch("/api/rules",{method:"POST",headers:H(),body:JSON.stringify({rules})});
+  if(r.ok){dirty(false);alert("Kaydedildi ✅")}else alert("Kaydedilemedi, şifreyi kontrol et.");
 };
-document.getElementById("save").onclick = async () => {
-  const bad = rules.find(r => r.conditions.some(c => Number.isNaN(c.value)));
-  if (bad) return alert(`"${bad.name}" kuralında boş bir değer var.`);
-  const r = await fetch("/api/rules", { method:"POST", headers:H(), body:JSON.stringify({ rules }) });
-  alert(r.ok ? "Kaydedildi ✅" : "Kaydedilemedi, şifreyi kontrol et.");
+$("test").onclick=async()=>{
+  const r=await fetch("/api/test",{method:"POST",headers:H()});
+  alert(r.ok?"Test mesajı gönderildi.":"Gönderilemedi.");
 };
-document.getElementById("test").onclick = async () => {
-  const r = await fetch("/api/test", { method:"POST", headers:H() });
-  alert(r.ok ? "Test mesajı gönderildi." : "Gönderilemedi.");
-};
-(async () => {
-  const r = await fetch("/api/rules", { headers:H() });
-  if (r.status === 401) { localStorage.removeItem("pw"); alert("Şifre yanlış, sayfayı yenile."); return; }
-  localStorage.setItem("pw", pw);
-  rules = (await r.json()).rules || [];
-  render();
+
+async function loadMatches(){
+  try{
+    const r=await fetch("/api/matches",{headers:H()});
+    const d=await r.json();
+    matches=d.matches||[];updated=d.updated;err=d.error||"";
+  }catch{err="Bağlantı hatası"}
+  status();
+  if(tab==="m")renderMatches();
+}
+
+(async()=>{
+  const r=await fetch("/api/rules",{headers:H()});
+  if(r.status===401){localStorage.removeItem("pw");alert("Şifre yanlış, sayfayı yenile.");return}
+  localStorage.setItem("pw",pw);
+  rules=(await r.json()).rules||[];
+  rules.forEach(x=>{x.conditions=x.conditions||[];if(x.matchId===undefined)x.matchId=null});
+  await loadMatches();render();
+  setInterval(loadMatches,20000);
 })();
 </script>
 </body>

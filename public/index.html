@@ -1,0 +1,132 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Bildirim Kuralları</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root { --bg:#eef1ec; --card:#fff; --ink:#15231a; --mute:#5d6b61; --line:#cfd8cf; --pitch:#1d6b3b; --warn:#b3261e; color-scheme:light; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg:#101712; --card:#18221b; --ink:#e6eee8; --mute:#93a498; --line:#2c3a30; --pitch:#4cc27a; --warn:#ff8a80; color-scheme:dark; }
+  }
+  * { box-sizing:border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 Barlow, system-ui, sans-serif; }
+  main { max-width:760px; margin:0 auto; padding:20px 14px 90px; }
+  h1 { font:700 34px/1 "Barlow Condensed", Impact, sans-serif; margin:8px 0 4px; }
+  .sub { color:var(--mute); margin:0 0 20px; }
+  .rule { background:var(--card); border:1px solid var(--line); border-left:6px solid var(--pitch); border-radius:6px; padding:14px; margin-bottom:14px; }
+  .rule.off { border-left-color:var(--line); opacity:.65; }
+  .head { display:flex; gap:10px; align-items:center; margin-bottom:10px; }
+  .head input[type=text] { flex:1; font:600 20px "Barlow Condensed", sans-serif; }
+  .cond { display:grid; grid-template-columns:1fr 70px 90px 36px; gap:6px; margin-bottom:6px; align-items:center; }
+  .and { color:var(--mute); font-size:13px; margin:0 0 6px 2px; }
+  select, input { font:inherit; color:var(--ink); background:var(--bg); border:1px solid var(--line); border-radius:4px; padding:9px 8px; min-width:0; width:100%; }
+  input[type=checkbox] { width:22px; height:22px; accent-color:var(--pitch); }
+  button { font:600 15px Barlow, sans-serif; border-radius:4px; border:1px solid var(--line); background:var(--card); color:var(--ink); padding:10px 14px; cursor:pointer; }
+  button.main { background:var(--pitch); border-color:var(--pitch); color:#fff; }
+  button.x { padding:8px; color:var(--warn); }
+  button:focus-visible, select:focus-visible, input:focus-visible { outline:2px solid var(--pitch); outline-offset:1px; }
+  .sum { margin:10px 0 0; padding-top:10px; border-top:1px dashed var(--line); color:var(--mute); font-size:14px; }
+  .row { display:flex; gap:8px; justify-content:space-between; margin-top:10px; }
+  .bar { position:fixed; inset:auto 0 0 0; background:var(--card); border-top:1px solid var(--line); padding:10px 14px calc(10px + env(safe-area-inset-bottom,0px)); display:flex; gap:8px; justify-content:center; }
+  .empty { padding:30px 10px; text-align:center; color:var(--mute); }
+  @media (max-width:520px) { .cond { grid-template-columns:1fr 1fr 36px; } .cond select:first-child { grid-column:1 / 4; } }
+</style>
+</head>
+<body>
+<main>
+  <h1>Bildirim kuralları</h1>
+  <p class="sub">Bir kuraldaki tüm koşullar aynı anda doğru olunca Telegram'a mesaj gider. "Veya" için ayrı kural ekle.</p>
+  <div id="rules"></div>
+  <button id="add">Kural ekle</button>
+</main>
+<div class="bar"><button class="main" id="save">Kaydet</button><button id="test">Test mesajı</button></div>
+
+<script>
+const METRICS = [
+  ["Maç önü oranı", [["pre_home","Ev sahibi maç önü oranı"],["pre_draw","Beraberlik maç önü oranı"],["pre_away","Deplasman maç önü oranı"]]],
+  ["Canlı oran",    [["live_home","Ev sahibi canlı oran"],["live_draw","Beraberlik canlı oran"],["live_away","Deplasman canlı oran"]]],
+  ["Skor",          [["home_goals","Ev sahibi gol"],["away_goals","Deplasman gol"],["total_goals","Toplam gol"],["goal_diff","Gol farkı (ev - dep)"]]],
+  ["Şut",           [["home_shots","Ev sahibi şut"],["away_shots","Deplasman şut"],["home_sot","Ev sahibi isabetli şut"],["away_sot","Deplasman isabetli şut"]]],
+  ["xG",            [["home_xg","Ev sahibi xG"],["away_xg","Deplasman xG"],["total_xg","Toplam xG"]]],
+  ["Zaman",         [["minute","Maç dakikası"]]]
+];
+const OPS = [[">=","≥"],[">","&gt;"],["<=","≤"],["<","&lt;"],["==","="]];
+const label = k => METRICS.flatMap(g => g[1]).find(m => m[0] === k)?.[1] || k;
+const opText = o => OPS.find(x => x[0] === o)[1].replace("&gt;",">").replace("&lt;","<");
+
+let rules = [];
+let pw = localStorage.getItem("pw") || prompt("Panel şifresi:");
+const H = () => ({ "Content-Type":"application/json", "x-password":pw });
+const uid = () => Math.random().toString(36).slice(2, 9);
+const newCond = () => ({ metric:"pre_home", op:">=", value:1.5 });
+const esc = s => String(s).replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+
+function render() {
+  const box = document.getElementById("rules");
+  if (!rules.length) { box.innerHTML = '<div class="empty">Henüz kural yok. "Kural ekle" ile başla.</div>'; return; }
+  box.innerHTML = rules.map((r, i) => `
+    <div class="rule ${r.enabled ? "" : "off"}">
+      <div class="head">
+        <input type="checkbox" ${r.enabled ? "checked" : ""} data-i="${i}" data-f="enabled" aria-label="Kural açık">
+        <input type="text" value="${esc(r.name)}" data-i="${i}" data-f="name" aria-label="Kural adı">
+      </div>
+      ${r.conditions.map((c, j) => `
+        ${j ? '<p class="and">ve</p>' : ""}
+        <div class="cond">
+          <select data-i="${i}" data-j="${j}" data-f="metric">
+            ${METRICS.map(g => `<optgroup label="${g[0]}">${g[1].map(m => `<option value="${m[0]}" ${m[0]===c.metric?"selected":""}>${m[1]}</option>`).join("")}</optgroup>`).join("")}
+          </select>
+          <select data-i="${i}" data-j="${j}" data-f="op">
+            ${OPS.map(o => `<option value="${o[0]}" ${o[0]===c.op?"selected":""}>${o[1]}</option>`).join("")}
+          </select>
+          <input type="number" step="any" inputmode="decimal" value="${c.value}" data-i="${i}" data-j="${j}" data-f="value">
+          <button class="x" data-del="${i}.${j}" aria-label="Koşulu sil">✕</button>
+        </div>`).join("")}
+      <div class="row">
+        <button data-addc="${i}">Koşul ekle</button>
+        <button class="x" data-delr="${i}">Kuralı sil</button>
+      </div>
+      <p class="sum">${r.conditions.length ? r.conditions.map(c => `${label(c.metric)} ${opText(c.op)} ${c.value}`).join(" ve ") : "Koşul yok, bu kural çalışmaz."}</p>
+    </div>`).join("");
+}
+
+document.addEventListener("input", e => {
+  const d = e.target.dataset; if (d.f === undefined) return;
+  const r = rules[d.i];
+  if (d.j !== undefined) r.conditions[d.j][d.f] = d.f === "value" ? parseFloat(e.target.value) : e.target.value;
+  else r[d.f] = e.target.type === "checkbox" ? e.target.checked : e.target.value;
+  if (d.f === "enabled") render();
+  else if (d.f !== "name") { document.querySelectorAll(".sum")[d.i].textContent = r.conditions.map(c => `${label(c.metric)} ${opText(c.op)} ${c.value}`).join(" ve "); }
+});
+document.addEventListener("click", e => {
+  const d = e.target.dataset;
+  if (d.addc) { rules[d.addc].conditions.push(newCond()); render(); }
+  if (d.del) { const [i, j] = d.del.split("."); rules[i].conditions.splice(j, 1); render(); }
+  if (d.delr && confirm("Bu kural silinsin mi?")) { rules.splice(d.delr, 1); render(); }
+});
+document.getElementById("add").onclick = () => {
+  rules.push({ id:uid(), name:"Yeni kural", enabled:true, conditions:[newCond()] }); render();
+};
+document.getElementById("save").onclick = async () => {
+  const bad = rules.find(r => r.conditions.some(c => Number.isNaN(c.value)));
+  if (bad) return alert(`"${bad.name}" kuralında boş bir değer var.`);
+  const r = await fetch("/api/rules", { method:"POST", headers:H(), body:JSON.stringify({ rules }) });
+  alert(r.ok ? "Kaydedildi ✅" : "Kaydedilemedi, şifreyi kontrol et.");
+};
+document.getElementById("test").onclick = async () => {
+  const r = await fetch("/api/test", { method:"POST", headers:H() });
+  alert(r.ok ? "Test mesajı gönderildi." : "Gönderilemedi.");
+};
+(async () => {
+  const r = await fetch("/api/rules", { headers:H() });
+  if (r.status === 401) { localStorage.removeItem("pw"); alert("Şifre yanlış, sayfayı yenile."); return; }
+  localStorage.setItem("pw", pw);
+  rules = (await r.json()).rules || [];
+  render();
+})();
+</script>
+</body>
+</html>

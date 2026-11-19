@@ -27,8 +27,8 @@ async function sendTelegram(text) {
 }
 
 // SENİN API'NE UYARLANACAK KISIM
+// status: API maç durumu veriyorsa (ör. "MS", "Devre arası") ekle, yoksa boş bırak.
 async function fetchLiveMatches() {
-  if (!SCORE_API_URL) return [];
   const r = await fetch(SCORE_API_URL);
   if (!r.ok) throw new Error("Skor API hatası: " + r.status);
   const data = await r.json();
@@ -37,6 +37,7 @@ async function fetchLiveMatches() {
     home: m.homeName,
     away: m.awayName,
     minute: m.minute,
+    status: m.status,
     homeGoals: m.homeScore,
     awayGoals: m.awayScore,
     preOdds: m.preOdds,
@@ -47,26 +48,36 @@ async function fetchLiveMatches() {
   }));
 }
 
+// Panelin maç listesi için son çekilen veri
+let cache = { matches: [], updated: null, error: "" };
+
 let polling = false;
 async function poll() {
   if (polling) return;
   polling = true;
   try {
+    if (!SCORE_API_URL) {
+      cache.error = "SCORE_API_URL tanımlı değil";
+      return;
+    }
+    const matches = await fetchLiveMatches();
+    cache = { matches, updated: Date.now(), error: "" };
+
     const rules = loadRules().filter((r) => r.enabled);
-    if (rules.length) {
-      for (const match of await fetchLiveMatches()) {
-        for (const rule of findTriggered(rules, match)) {
-          await sendTelegram(formatAlert(match, rule));
-          console.log("Gönderildi:", rule.name, match.home, "-", match.away);
-        }
+    for (const match of matches) {
+      for (const rule of findTriggered(rules, match)) {
+        await sendTelegram(formatAlert(match, rule));
+        console.log("Gönderildi:", rule.name, match.home, "-", match.away);
       }
     }
   } catch (e) {
+    cache.error = e.message;
     console.error("poll hatası:", e.message);
   } finally {
     polling = false;
   }
 }
+poll();
 setInterval(poll, Math.max(5, Number(POLL_SECONDS)) * 1000);
 
 const app = express();
@@ -83,6 +94,15 @@ app.post("/api/rules", auth, (req, res) => {
   if (!Array.isArray(rules)) return res.status(400).json({ error: "geçersiz veri" });
   saveRules(rules);
   res.json({ ok: true });
+});
+
+app.get("/api/matches", auth, (req, res) => {
+  res.json({
+    matches: cache.matches.map(({ id, home, away, minute, status, homeGoals, awayGoals }) =>
+      ({ id, home, away, minute, status, homeGoals, awayGoals })),
+    updated: cache.updated,
+    error: cache.error,
+  });
 });
 
 app.post("/api/test", auth, async (req, res) => {

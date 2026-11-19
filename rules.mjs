@@ -1,18 +1,23 @@
 // Kural motoru: paneldeki kuralları canlı maç verisine karşı değerlendirir.
 
+const num = (v) => (v === undefined || v === null || v === "" || Number.isNaN(Number(v)) ? null : Number(v));
+const add = (a, b) => (a === null || b === null ? null : a + b);
+const sub = (a, b) => (a === null || b === null ? null : a - b);
+
 export function toMetrics(m) {
-  const g = (v) => (v === undefined || v === null ? null : Number(v));
+  const hg = num(m.homeGoals), ag = num(m.awayGoals);
+  const hx = num(m.xg?.home), ax = num(m.xg?.away);
   return {
-    pre_home: g(m.preOdds?.home), pre_draw: g(m.preOdds?.draw), pre_away: g(m.preOdds?.away),
-    live_home: g(m.liveOdds?.home), live_draw: g(m.liveOdds?.draw), live_away: g(m.liveOdds?.away),
-    home_goals: g(m.homeGoals), away_goals: g(m.awayGoals),
-    total_goals: g(m.homeGoals) + g(m.awayGoals),
-    goal_diff: g(m.homeGoals) - g(m.awayGoals),
-    home_shots: g(m.shots?.home), away_shots: g(m.shots?.away),
-    home_sot: g(m.shotsOnTarget?.home), away_sot: g(m.shotsOnTarget?.away),
-    home_xg: g(m.xg?.home), away_xg: g(m.xg?.away),
-    total_xg: g(m.xg?.home) + g(m.xg?.away),
-    minute: g(m.minute),
+    pre_home: num(m.preOdds?.home), pre_draw: num(m.preOdds?.draw), pre_away: num(m.preOdds?.away),
+    live_home: num(m.liveOdds?.home), live_draw: num(m.liveOdds?.draw), live_away: num(m.liveOdds?.away),
+    home_goals: hg, away_goals: ag,
+    total_goals: add(hg, ag),
+    goal_diff: sub(hg, ag),
+    home_shots: num(m.shots?.home), away_shots: num(m.shots?.away),
+    home_sot: num(m.shotsOnTarget?.home), away_sot: num(m.shotsOnTarget?.away),
+    home_xg: hx, away_xg: ax,
+    total_xg: add(hx, ax),
+    minute: num(m.minute),
   };
 }
 
@@ -37,7 +42,6 @@ export function findTriggered(rules, match) {
   const metrics = toMetrics(match);
   const out = [];
   for (const rule of rules) {
-    // Kural belirli bir maça bağlıysa sadece o maçta çalışır
     if (rule.matchId && String(rule.matchId) !== String(match.id)) continue;
     const key = `${match.id}:${rule.id}`;
     if (!fired.has(key) && ruleMatches(rule, metrics)) {

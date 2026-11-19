@@ -37,6 +37,8 @@ export function findTriggered(rules, match) {
   const metrics = toMetrics(match);
   const out = [];
   for (const rule of rules) {
+    // Kural belirli bir maça bağlıysa sadece o maçta çalışır
+    if (rule.matchId && String(rule.matchId) !== String(match.id)) continue;
     const key = `${match.id}:${rule.id}`;
     if (!fired.has(key) && ruleMatches(rule, metrics)) {
       fired.add(key);

@@ -27,8 +27,10 @@ nav button.on{color:var(--acc);border-color:var(--acc)}
 nav b{font:600 11px "IBM Plex Mono",monospace;background:var(--p2);border-radius:8px;padding:1px 6px;margin-left:4px}
 main{max-width:640px;margin:0 auto;padding:10px 12px}
 .empty{color:var(--mute);padding:28px 8px;text-align:center}
+.mute{color:var(--mute);font-size:12px;margin-top:6px}
 #q{margin-bottom:6px}
-.m{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;padding:8px 2px;border-bottom:1px solid var(--line)}
+.mw{border-bottom:1px solid var(--line)}
+.m{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;padding:8px 2px;cursor:pointer}
 .min{font:600 12px "IBM Plex Mono",monospace;text-align:center;border-radius:3px;padding:4px 0;background:var(--p2);color:var(--mute)}
 .min.live{background:var(--live);color:#fff}
 .tm{display:flex;justify-content:space-between;gap:8px;min-width:0}
@@ -36,29 +38,41 @@ main{max-width:640px;margin:0 auto;padding:10px 12px}
 .tm b{font-weight:600}
 .add{display:flex;align-items:center;gap:4px;min-width:40px;height:34px;justify-content:center;border:1px solid var(--line);border-radius:5px;color:var(--acc);font-size:16px}
 .add i{font:600 11px "IBM Plex Mono",monospace;font-style:normal;background:var(--acc);color:#111;border-radius:8px;padding:0 5px}
+.dt{background:var(--p);border:1px solid var(--line);border-radius:6px;padding:10px;margin:0 0 10px}
+.dt table{width:100%;border-collapse:collapse;font-size:13px}
+.dt th{color:var(--mute);font-weight:500;font-size:11px;text-align:center;padding:2px}
+.dt td{padding:5px 2px;text-align:center;border-top:1px solid var(--line)}
+.dt td:first-child{text-align:left;color:var(--mute)}
+.dt .tot{margin:10px 0 6px;font-size:13px}
+.dt .sx td:first-child,.dt .sx td:last-child{font:600 13px "IBM Plex Mono",monospace;width:25%;color:var(--ink)}
+.dt .sx td:nth-child(2){color:var(--mute)}
 .r{background:var(--p);border:1px solid var(--line);border-radius:6px;margin-bottom:6px}
 .r.off .t{opacity:.5}
+.r.dr{border-style:dashed;border-color:var(--acc)}
 .rh{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:8px 10px}
 .t{min-width:0;cursor:pointer}
 .n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .s{color:var(--mute);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.bd{font:600 10px "IBM Plex Mono",monospace;background:var(--acc);color:#111;border-radius:3px;padding:3px 5px;letter-spacing:.04em}
 .chev{color:var(--mute);padding:4px 6px}
 .rb{padding:2px 10px 10px;border-top:1px solid var(--line)}
 .f{display:block;color:var(--mute);font-size:12px;margin:10px 0 4px}
 .c{display:grid;grid-template-columns:1fr 54px 66px 28px;gap:5px;margin-bottom:5px}
 .x{color:var(--live)}
 .ghost{border:1px solid var(--line);border-radius:5px;padding:8px 12px;color:var(--acc);margin-bottom:8px}
-.row{display:flex;justify-content:space-between;margin-top:8px}
+.row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px}
+.go{background:var(--acc);color:#111;font-weight:600;border-radius:5px;padding:9px 14px}
 .sw{position:relative;width:34px;height:20px;flex:none}
 .sw input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;padding:0;cursor:pointer}
 .sw span{position:absolute;inset:0;background:var(--line);border-radius:10px;transition:.15s;pointer-events:none}
 .sw span::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.15s}
 .sw input:checked+span{background:var(--ok)}
 .sw input:checked+span::after{transform:translateX(14px)}
-.sw input:focus-visible+span{outline:2px solid var(--acc)}
 .bar{position:fixed;left:0;right:0;bottom:0;background:var(--p);border-top:1px solid var(--line);padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));display:flex;gap:8px;justify-content:center}
 .bar button{border:1px solid var(--line);border-radius:5px;padding:10px 18px;font-weight:600}
 .bar #save{background:var(--acc);border-color:var(--acc);color:#111}
+#toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ok);color:#06210f;font-weight:600;padding:8px 14px;border-radius:6px;opacity:0;pointer-events:none;transition:.2s;z-index:9}
+#toast.on{opacity:1}
 @media(max-width:420px){.c{grid-template-columns:1fr 1fr 28px}.c select:first-child{grid-column:1/-1}}
 </style>
 </head>
@@ -75,21 +89,23 @@ main{max-width:640px;margin:0 auto;padding:10px 12px}
   <div id="pr" hidden></div>
 </main>
 <div class="bar"><button id="save">Kaydet</button><button id="test">Test mesajı</button></div>
+<div id="toast"></div>
 
 <script>
 const GROUPS=[
- ["Maç önü oranı",[["pre_home","Ev"],["pre_draw","Beraberlik"],["pre_away","Deplasman"]]],
- ["Canlı oran",[["live_home","Ev"],["live_draw","Beraberlik"],["live_away","Deplasman"]]],
+ ["Maç önü oranı",[["pre_home","Ev"],["pre_draw","Beraberlik"],["pre_away","Deplasman"],["pre_over25","2.5 Üst"]]],
+ ["Canlı oran",[["live_home","Ev"],["live_draw","Beraberlik"],["live_away","Deplasman"],["live_over25","2.5 Üst"]]],
  ["Skor",[["home_goals","Ev gol"],["away_goals","Dep gol"],["total_goals","Toplam gol"],["goal_diff","Fark (ev-dep)"]]],
- ["Şut",[["home_shots","Ev şut"],["away_shots","Dep şut"],["home_sot","Ev isabetli"],["away_sot","Dep isabetli"]]],
+ ["Şut",[["home_shots","Ev şut"],["away_shots","Dep şut"],["total_shots","Toplam şut"],["home_sot","Ev isabetli"],["away_sot","Dep isabetli"],["total_sot","Toplam isabetli"]]],
  ["xG",[["home_xg","Ev"],["away_xg","Dep"],["total_xg","Toplam"]]],
  ["Zaman",[["minute","Dakika"]]]
 ];
 const LBL={};GROUPS.forEach(g=>g[1].forEach(m=>LBL[m[0]]=g[0]+" · "+m[1]));
 const OPV=[[">=","≥"],[">",">"],["<=","≤"],["<","<"],["==","="]];
+const SN={"Shots on Goal":"İsabetli şut","Shots off Goal":"İsabetsiz şut","Total Shots":"Toplam şut","Blocked Shots":"Engellenen şut","Shots insidebox":"Ceza sahası içi şut","Shots outsidebox":"Ceza sahası dışı şut","Fouls":"Faul","Corner Kicks":"Korner","Offsides":"Ofsayt","Ball Possession":"Topla oynama","Yellow Cards":"Sarı kart","Red Cards":"Kırmızı kart","Goalkeeper Saves":"Kaleci kurtarışı","Total passes":"Toplam pas","Passes accurate":"İsabetli pas","Passes %":"Pas isabeti","expected_goals":"Gol beklentisi (xG)","goals_prevented":"Önlenen gol"};
 
 const $=id=>document.getElementById(id);
-let rules=[],matches=[],updated=null,err="",tab="m",open=null,isDirty=false;
+let rules=[],matches=[],updated=null,err="",tab="m",open=null,openM=null,det={},isDirty=false;
 let pw=localStorage.getItem("pw")||prompt("Panel şifresi:");
 const H=()=>({"Content-Type":"application/json","x-password":pw});
 const uid=()=>Math.random().toString(36).slice(2,9);
@@ -98,9 +114,10 @@ const newCond=()=>({metric:"pre_home",op:">=",value:1.5});
 const opT=o=>(OPV.find(x=>x[0]===o)||[0,o])[1];
 const isLive=m=>!m.status&&Number(m.minute)>0;
 const same=(a,b)=>String(a)===String(b);
-
+const unsaved=()=>isDirty||rules.some(r=>r.draft);
 function dirty(v){isDirty=v;$("save").textContent=v?"Kaydet •":"Kaydet"}
-window.onbeforeunload=()=>isDirty?"Kaydedilmemiş değişiklik var":undefined;
+window.onbeforeunload=()=>unsaved()?"Kaydedilmemiş değişiklik var":undefined;
+let tt;function toast(t){const e=$("toast");e.textContent=t;e.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>e.classList.remove("on"),2200)}
 
 function status(){
   $("dot").className="dot"+(updated&&!err?" ok":"");
@@ -108,17 +125,31 @@ function status(){
   $("nm").textContent=matches.length;$("nr").textContent=rules.length;
 }
 
+function detailHtml(m){
+  const d=det[m.id];
+  if(!d)return '<div class="dt mute">Yükleniyor...</div>';
+  if(d.error)return `<div class="dt mute">${esc(d.error)}</div>`;
+  const f=v=>v==null||v===""?"–":esc(v);
+  const row=(t,x)=>x?`<tr><td>${t}</td><td>${f(x.home)}</td><td>${f(x.draw)}</td><td>${f(x.away)}</td><td>${f(x.over25)}</td><td>${f(x.under25)}</td></tr>`:`<tr><td>${t}</td><td colspan="5" class="mute">veri yok</td></tr>`;
+  const T=d.totals||{},o=d.odds||{};
+  return `<div class="dt">
+    <table><tr><th></th><th>1</th><th>X</th><th>2</th><th>2.5 Üst</th><th>2.5 Alt</th></tr>${row("Maç önü",o.pre)}${row("Canlı",o.live)}</table>
+    <p class="tot">Toplam şut <b class="mono">${f(T.shots)}</b> · isabetli <b class="mono">${f(T.sot)}</b> · xG <b class="mono">${T.xg==null?"–":T.xg.toFixed(2)}</b></p>
+    ${d.stats.length?`<table class="sx">${d.stats.map(s=>`<tr><td>${f(s.home)}</td><td>${esc(SN[s.type]||s.type)}</td><td>${f(s.away)}</td></tr>`).join("")}</table>`:'<p class="mute">İstatistik yok.</p>'}
+    ${d.warn?`<p class="mute">${esc(d.warn)}</p>`:""}</div>`;
+}
+
 function renderMatches(){
   const q=$("q").value.trim().toLowerCase();
   const L=matches.filter(m=>!q||(m.home+" "+m.away).toLowerCase().includes(q)).sort((a,b)=>isLive(b)-isLive(a));
   $("list").innerHTML=L.length?L.map(m=>{
-    const n=rules.filter(r=>r.matchId&&same(r.matchId,m.id)).length,lv=isLive(m);
-    return `<div class="m">
+    const n=rules.filter(r=>r.matchId&&same(r.matchId,m.id)&&!r.draft).length,lv=isLive(m);
+    return `<div class="mw"><div class="m" data-om="${esc(m.id)}">
       <div class="min ${lv?"live":""}">${lv?esc(m.minute)+"'":esc(m.status||"–")}</div>
       <div><div class="tm"><span>${esc(m.home)}</span><b class="mono">${esc(m.homeGoals==null?"-":m.homeGoals)}</b></div>
       <div class="tm"><span>${esc(m.away)}</span><b class="mono">${esc(m.awayGoals==null?"-":m.awayGoals)}</b></div></div>
       <button class="add" data-newm="${esc(m.id)}" aria-label="Bu maça kural ekle">${n?`<i>${n}</i>`:""}＋</button>
-    </div>`}).join(""):`<p class="empty">${matches.length?"Eşleşen maç yok.":"Maç verisi yok. Skor API'si bağlı mı?"}</p>`;
+    </div>${same(openM,m.id)?detailHtml(m):""}</div>`}).join(""):`<p class="empty">${matches.length?"Eşleşen maç yok.":"Maç verisi yok. Skor API'si bağlı mı?"}</p>`;
 }
 
 const target=r=>r.matchId?esc(r.matchLabel||("Maç "+r.matchId)):"Tüm maçlar";
@@ -139,18 +170,19 @@ function body(r,i){
       <input type="number" step="any" inputmode="decimal" value="${esc(c.value)}" data-r="${i}" data-j="${j}" data-f="value">
       <button class="x" data-del="${i}.${j}" aria-label="Koşulu sil">✕</button>
     </div>`).join("")}
-    <div class="row"><button class="ghost" data-addc="${i}">＋ Koşul</button><button class="x" data-delr="${i}">Kuralı sil</button></div>
+    <div class="row"><button class="ghost" data-addc="${i}">＋ Koşul</button><button class="x" data-delr="${i}">${r.draft?"Vazgeç":"Kuralı sil"}</button></div>
+    <div class="row"><span class="mute">${r.draft?"Kaydedilene kadar çalışmaz.":""}</span><button class="go" data-save="${esc(r.id)}">${r.draft?"Kaydet ve başlat":"Kaydet"}</button></div>
   </div>`;
 }
 
 function renderRules(){
   const L=rules.map((r,i)=>{
     const o=open===r.id;
-    return `<div class="r ${r.enabled?"":"off"}">
+    return `<div class="r ${r.enabled?"":"off"} ${r.draft?"dr":""}">
       <div class="rh">
-        <label class="sw"><input type="checkbox" data-en="${i}" ${r.enabled?"checked":""} aria-label="Kural açık"><span></span></label>
-        <div class="t" data-open="${r.id}"><div class="n">${esc(r.name)||"İsimsiz"}</div><div class="s">${r.matchId?"⚽ ":""}${target(r)} · ${esc(sumText(r))}</div></div>
-        <button class="chev" data-open="${r.id}" aria-label="Aç/kapat">${o?"▾":"▸"}</button>
+        ${r.draft?'<span class="bd">TASLAK</span>':`<label class="sw"><input type="checkbox" data-en="${i}" ${r.enabled?"checked":""} aria-label="Kural açık"><span></span></label>`}
+        <div class="t" data-open="${esc(r.id)}"><div class="n">${esc(r.name)||"İsimsiz"}</div><div class="s">${r.matchId?"⚽ ":""}${target(r)} · ${esc(sumText(r))}</div></div>
+        <button class="chev" data-open="${esc(r.id)}" aria-label="Aç/kapat">${o?"▾":"▸"}</button>
       </div>${o?body(r,i):""}</div>`}).join("");
   $("pr").innerHTML=`<button class="ghost" data-newall>＋ Tüm maçlar için kural</button>`+(L||`<p class="empty">Kural yok. Maçlar sekmesinden bir maç seç ya da yukarıdan ekle.</p>`);
 }
@@ -164,8 +196,20 @@ function render(){
 
 function addRule(m){
   const lbl=m?`${m.home} – ${m.away}`:"";
-  const r={id:uid(),name:m?lbl:"Yeni kural",enabled:true,matchId:m?String(m.id):null,matchLabel:lbl,conditions:[newCond()]};
-  rules.unshift(r);open=r.id;tab="r";dirty(true);render();window.scrollTo(0,0);
+  const r={id:uid(),name:m?lbl:"Yeni kural",enabled:true,draft:true,matchId:m?String(m.id):null,matchLabel:lbl,conditions:[newCond()]};
+  rules.unshift(r);open=r.id;tab="r";render();window.scrollTo(0,0);
+}
+
+async function saveAll(activate){
+  const list=rules.filter(r=>!r.draft||r.id===activate);
+  const bad=list.find(r=>!r.conditions.length||r.conditions.some(c=>Number.isNaN(c.value)));
+  if(bad)return alert(`"${bad.name}" kuralında boş bir değer ya da koşul yok.`);
+  const payload=list.map(({draft,...r})=>r);
+  const r=await fetch("/api/rules",{method:"POST",headers:H(),body:JSON.stringify({rules:payload})});
+  if(!r.ok)return alert("Kaydedilemedi, şifreyi kontrol et.");
+  const a=rules.find(x=>x.id===activate);
+  if(a){a.draft=false;a.enabled=true;open=null}
+  dirty(false);render();toast(a?"Kural kaydedildi, çalışıyor ✅":"Kaydedildi ✅");
 }
 
 document.addEventListener("input",e=>{
@@ -183,29 +227,31 @@ document.addEventListener("input",e=>{
   r[d.f]=t.value;
 });
 document.addEventListener("click",e=>{
-  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr]");
+  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om]");
   if(!b)return;const d=b.dataset;
   if(d.tab){tab=d.tab;render();return}
   if(d.open){open=open===d.open?null:d.open;render();return}
   if(d.newm!==undefined){addRule(matches.find(x=>same(x.id,d.newm))||null);return}
+  if(d.om!==undefined){openM=same(openM,d.om)?null:d.om;renderMatches();if(openM)loadDetail(openM);return}
   if(d.newall!==undefined){addRule(null);return}
+  if(d.save){saveAll(d.save);return}
   if(d.addc!==undefined){rules[d.addc].conditions.push(newCond());dirty(true);render();return}
   if(d.del){const[i,j]=d.del.split(".");rules[i].conditions.splice(j,1);dirty(true);render();return}
-  if(d.delr!==undefined&&confirm("Bu kural silinsin mi?")){rules.splice(d.delr,1);open=null;dirty(true);render()}
+  if(d.delr!==undefined){const r=rules[d.delr];if(r.draft||confirm("Bu kural silinsin mi?")){rules.splice(d.delr,1);open=null;if(!r.draft)dirty(true);render()}}
 });
 $("q").oninput=renderMatches;
 
-$("save").onclick=async()=>{
-  const bad=rules.find(r=>r.conditions.some(c=>Number.isNaN(c.value)));
-  if(bad)return alert(`"${bad.name}" kuralında boş bir değer var.`);
-  const r=await fetch("/api/rules",{method:"POST",headers:H(),body:JSON.stringify({rules})});
-  if(r.ok){dirty(false);alert("Kaydedildi ✅")}else alert("Kaydedilemedi, şifreyi kontrol et.");
-};
+$("save").onclick=()=>saveAll(null);
 $("test").onclick=async()=>{
   const r=await fetch("/api/test",{method:"POST",headers:H()});
   alert(r.ok?"Test mesajı gönderildi.":"Gönderilemedi.");
 };
 
+async function loadDetail(id){
+  try{const r=await fetch("/api/match/"+encodeURIComponent(id),{headers:H()});det[id]=r.ok?await r.json():{error:"Veri alınamadı"}}
+  catch{det[id]={error:"Bağlantı hatası"}}
+  if(tab==="m"&&same(openM,id))renderMatches();
+}
 async function loadMatches(){
   try{
     const r=await fetch("/api/matches",{headers:H()});
@@ -214,6 +260,7 @@ async function loadMatches(){
   }catch{err="Bağlantı hatası"}
   status();
   if(tab==="m")renderMatches();
+  if(openM)loadDetail(openM);
 }
 
 (async()=>{
@@ -223,7 +270,7 @@ async function loadMatches(){
   rules=(await r.json()).rules||[];
   rules.forEach(x=>{x.conditions=x.conditions||[];if(x.matchId===undefined)x.matchId=null});
   await loadMatches();render();
-  setInterval(loadMatches,20000);
+  setInterval(loadMatches,15000);
 })();
 </script>
 </body>

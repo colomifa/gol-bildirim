@@ -16,11 +16,14 @@ select,input{font:inherit;color:var(--ink);background:var(--p2);border:1px solid
 .mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
 header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:calc(8px + env(safe-area-inset-top,0px)) 12px 0}
 .w{max-width:640px;margin:0 auto}
-.top{display:flex;justify-content:space-between;align-items:center}
+.top{display:flex;justify-content:space-between;align-items:center;gap:8px}
 h1{font:600 14px "IBM Plex Mono",monospace;letter-spacing:.06em;text-transform:uppercase}
-.st{font-size:12px;color:var(--mute);display:flex;align-items:center;gap:6px}
-#stt{max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.rt{display:flex;align-items:center;gap:10px;min-width:0}
+.st{font-size:12px;color:var(--mute);display:flex;align-items:center;gap:6px;min-width:0}
+#stt{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .dot{width:7px;height:7px;border-radius:50%;background:var(--mute);flex:none}.dot.ok{background:var(--ok)}
+.pill{font:600 11px "IBM Plex Mono",monospace;letter-spacing:.05em;border-radius:12px;padding:5px 10px;border:1px solid var(--ok);color:var(--ok);white-space:nowrap}
+.pill.off{border-color:var(--live);color:var(--live);background:rgba(229,72,77,.12)}
 nav{display:flex;margin-top:4px}
 nav button{flex:1;padding:9px 0;color:var(--mute);border-bottom:2px solid transparent;font-weight:500}
 nav button.on{color:var(--acc);border-color:var(--acc)}
@@ -28,6 +31,7 @@ nav b{font:600 11px "IBM Plex Mono",monospace;background:var(--p2);border-radius
 main{max-width:640px;margin:0 auto;padding:10px 12px}
 .empty{color:var(--mute);padding:28px 8px;text-align:center}
 .mute{color:var(--mute);font-size:12px;margin-top:6px}
+.note{background:rgba(229,72,77,.12);border:1px solid var(--live);color:var(--live);border-radius:5px;padding:8px 10px;margin-bottom:8px;font-size:13px}
 #q{margin-bottom:6px}
 .mw{border-bottom:1px solid var(--line)}
 .m{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;padding:8px 2px;cursor:pointer}
@@ -44,8 +48,11 @@ main{max-width:640px;margin:0 auto;padding:10px 12px}
 .dt td{padding:5px 2px;text-align:center;border-top:1px solid var(--line)}
 .dt td:first-child{text-align:left;color:var(--mute)}
 .dt .tot{margin:10px 0 6px;font-size:13px}
-.dt .sx td:first-child,.dt .sx td:last-child{font:600 13px "IBM Plex Mono",monospace;width:25%;color:var(--ink)}
+.dt .sx td:first-child,.dt .sx td:last-child{font:600 13px "IBM Plex Mono",monospace;width:25%;color:var(--ink);text-align:center}
 .dt .sx td:nth-child(2){color:var(--mute)}
+.pt{display:flex;gap:6px;margin:10px 0 4px}
+.pt button{flex:1;border:1px solid var(--line);border-radius:5px;padding:6px 0;color:var(--mute);font-size:13px}
+.pt button.on{border-color:var(--acc);color:var(--acc)}
 .r{background:var(--p);border:1px solid var(--line);border-radius:6px;margin-bottom:6px}
 .r.off .t{opacity:.5}
 .r.dr{border-style:dashed;border-color:var(--acc)}
@@ -57,7 +64,10 @@ main{max-width:640px;margin:0 auto;padding:10px 12px}
 .chev{color:var(--mute);padding:4px 6px}
 .rb{padding:2px 10px 10px;border-top:1px solid var(--line)}
 .f{display:block;color:var(--mute);font-size:12px;margin:10px 0 4px}
+.mm{display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;color:var(--mute)}
 .c{display:grid;grid-template-columns:1fr 54px 66px 28px;gap:5px;margin-bottom:5px}
+.c .pr{grid-column:1/-1;margin-bottom:3px;display:flex;gap:6px;align-items:center}
+.c .pr input{width:70px;flex:none}
 .x{color:var(--live)}
 .ghost{border:1px solid var(--line);border-radius:5px;padding:8px 12px;color:var(--acc);margin-bottom:8px}
 .row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px}
@@ -71,21 +81,23 @@ main{max-width:640px;margin:0 auto;padding:10px 12px}
 .bar{position:fixed;left:0;right:0;bottom:0;background:var(--p);border-top:1px solid var(--line);padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));display:flex;gap:8px;justify-content:center}
 .bar button{border:1px solid var(--line);border-radius:5px;padding:10px 18px;font-weight:600}
 .bar #save{background:var(--acc);border-color:var(--acc);color:#111}
-#toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ok);color:#06210f;font-weight:600;padding:8px 14px;border-radius:6px;opacity:0;pointer-events:none;transition:.2s;z-index:9}
+#toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ok);color:#06210f;font-weight:600;padding:8px 14px;border-radius:6px;opacity:0;pointer-events:none;transition:.2s;z-index:9;max-width:90vw;text-align:center}
 #toast.on{opacity:1}
-@media(max-width:420px){.c{grid-template-columns:1fr 1fr 28px}.c select:first-child{grid-column:1/-1}}
+@media(max-width:420px){.c{grid-template-columns:1fr 1fr 28px}.c select:first-child{grid-column:1/-1}#stt{max-width:80px}}
 </style>
 </head>
 <body>
 <header><div class="w">
-  <div class="top"><h1>Gol Paneli</h1><div class="st"><span class="dot" id="dot"></span><span id="stt">...</span></div></div>
+  <div class="top"><h1>Gol Paneli</h1>
+    <div class="rt"><div class="st"><span class="dot" id="dot"></span><span id="stt">...</span></div><button class="pill" id="act">● AKTİF</button></div>
+  </div>
   <nav>
     <button data-tab="m" class="on">Maçlar <b id="nm">0</b></button>
     <button data-tab="r">Kurallar <b id="nr">0</b></button>
   </nav>
 </div></header>
 <main>
-  <div id="pm"><input id="q" type="search" placeholder="Takım ara..."><div id="list"></div></div>
+  <div id="pm"><div id="note" class="note" hidden>Pasif: API'ye sorgu atılmıyor, bildirim gitmiyor. Liste güncellenmez.</div><input id="q" type="search" placeholder="Takım ara..."><div id="list"></div></div>
   <div id="pr" hidden></div>
 </main>
 <div class="bar"><button id="save">Kaydet</button><button id="test">Test mesajı</button></div>
@@ -98,30 +110,37 @@ const GROUPS=[
  ["Skor",[["home_goals","Ev gol"],["away_goals","Dep gol"],["total_goals","Toplam gol"],["goal_diff","Fark (ev-dep)"]]],
  ["Şut",[["home_shots","Ev şut"],["away_shots","Dep şut"],["total_shots","Toplam şut"],["home_sot","Ev isabetli"],["away_sot","Dep isabetli"],["total_sot","Toplam isabetli"]]],
  ["xG",[["home_xg","Ev"],["away_xg","Dep"],["total_xg","Toplam"]]],
+ ["Kırmızı kart",[["home_red","Ev"],["away_red","Dep"],["total_red","Toplam"]]],
  ["Zaman",[["minute","Dakika"]]]
 ];
 const LBL={};GROUPS.forEach(g=>g[1].forEach(m=>LBL[m[0]]=g[0]+" · "+m[1]));
 const OPV=[[">=","≥"],[">",">"],["<=","≤"],["<","<"],["==","="]];
+const PER=[["all","Tüm maç"],["h1","1. yarı"],["h2","2. yarı"],["last","Son N dakika"]];
+const TABS=[["all","Tümü"],["h1","1. yarı"],["h2","2. yarı"],["l10","Son 10 dk"]];
+const STAT=/shots|sot|xg|red/;
 const SN={"Shots on Goal":"İsabetli şut","Shots off Goal":"İsabetsiz şut","Total Shots":"Toplam şut","Blocked Shots":"Engellenen şut","Shots insidebox":"Ceza sahası içi şut","Shots outsidebox":"Ceza sahası dışı şut","Fouls":"Faul","Corner Kicks":"Korner","Offsides":"Ofsayt","Ball Possession":"Topla oynama","Yellow Cards":"Sarı kart","Red Cards":"Kırmızı kart","Goalkeeper Saves":"Kaleci kurtarışı","Total passes":"Toplam pas","Passes accurate":"İsabetli pas","Passes %":"Pas isabeti","expected_goals":"Gol beklentisi (xG)","goals_prevented":"Önlenen gol"};
 
 const $=id=>document.getElementById(id);
-let rules=[],matches=[],updated=null,err="",tab="m",open=null,openM=null,det={},isDirty=false;
+let rules=[],matches=[],updated=null,err="",active=true,tab="m",open=null,openM=null,dper="all",det={},isDirty=false;
 let pw=localStorage.getItem("pw")||prompt("Panel şifresi:");
 const H=()=>({"Content-Type":"application/json","x-password":pw});
 const uid=()=>Math.random().toString(36).slice(2,9);
 const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const newCond=()=>({metric:"pre_home",op:">=",value:1.5});
+const newCond=()=>({metric:"pre_home",op:">=",value:1.5,period:"all"});
 const opT=o=>(OPV.find(x=>x[0]===o)||[0,o])[1];
 const isLive=m=>!m.status&&Number(m.minute)>0;
 const same=(a,b)=>String(a)===String(b);
 const unsaved=()=>isDirty||rules.some(r=>r.draft);
 function dirty(v){isDirty=v;$("save").textContent=v?"Kaydet •":"Kaydet"}
 window.onbeforeunload=()=>unsaved()?"Kaydedilmemiş değişiklik var":undefined;
-let tt;function toast(t){const e=$("toast");e.textContent=t;e.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>e.classList.remove("on"),2200)}
+let tt;function toast(t){const e=$("toast");e.textContent=t;e.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>e.classList.remove("on"),2400)}
 
 function status(){
-  $("dot").className="dot"+(updated&&!err?" ok":"");
-  $("stt").textContent=err||(updated?new Date(updated).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"bekleniyor");
+  $("dot").className="dot"+(active&&updated&&!err?" ok":"");
+  $("stt").textContent=!active?"pasif":err||(updated?new Date(updated).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"bekleniyor");
+  $("act").textContent=active?"● AKTİF":"○ PASİF";
+  $("act").className="pill"+(active?"":" off");
+  $("note").hidden=active;
   $("nm").textContent=matches.length;$("nr").textContent=rules.length;
 }
 
@@ -129,13 +148,15 @@ function detailHtml(m){
   const d=det[m.id];
   if(!d)return '<div class="dt mute">Yükleniyor...</div>';
   if(d.error)return `<div class="dt mute">${esc(d.error)}</div>`;
+  if(d.passive)return '<div class="dt mute">Pasif: API\'ye sorgu atılmıyor.</div>';
   const f=v=>v==null||v===""?"–":esc(v);
   const row=(t,x)=>x?`<tr><td>${t}</td><td>${f(x.home)}</td><td>${f(x.draw)}</td><td>${f(x.away)}</td><td>${f(x.over25)}</td><td>${f(x.under25)}</td></tr>`:`<tr><td>${t}</td><td colspan="5" class="mute">veri yok</td></tr>`;
-  const T=d.totals||{},o=d.odds||{};
+  const T=(d.totals||{})[dper]||{},o=d.odds||{},rows=(d.stats||{})[dper]||[];
   return `<div class="dt">
     <table><tr><th></th><th>1</th><th>X</th><th>2</th><th>2.5 Üst</th><th>2.5 Alt</th></tr>${row("Maç önü",o.pre)}${row("Canlı",o.live)}</table>
-    <p class="tot">Toplam şut <b class="mono">${f(T.shots)}</b> · isabetli <b class="mono">${f(T.sot)}</b> · xG <b class="mono">${T.xg==null?"–":T.xg.toFixed(2)}</b></p>
-    ${d.stats.length?`<table class="sx">${d.stats.map(s=>`<tr><td>${f(s.home)}</td><td>${esc(SN[s.type]||s.type)}</td><td>${f(s.away)}</td></tr>`).join("")}</table>`:'<p class="mute">İstatistik yok.</p>'}
+    <div class="pt">${TABS.map(p=>`<button data-per="${p[0]}" class="${p[0]===dper?"on":""}">${p[1]}</button>`).join("")}</div>
+    <p class="tot">Toplam şut <b class="mono">${f(T.shots)}</b> · isabetli <b class="mono">${f(T.sot)}</b> · xG <b class="mono">${T.xg==null?"–":T.xg.toFixed(2)}</b> · kırmızı <b class="mono">${f(T.red)}</b></p>
+    ${rows.length?`<table class="sx">${rows.map(s=>`<tr><td>${f(s.home)}</td><td>${esc(SN[s.type]||s.type)}</td><td>${f(s.away)}</td></tr>`).join("")}</table>`:`<p class="mute">${dper==="l10"?"Son 10 dk yalnızca özet gösterir. Sunucu bu maçı en az 10 dk izlediyse dolar.":"Bu dönem için istatistik yok."}</p>`}
     ${d.warn?`<p class="mute">${esc(d.warn)}</p>`:""}</div>`;
 }
 
@@ -153,125 +174,6 @@ function renderMatches(){
 }
 
 const target=r=>r.matchId?esc(r.matchLabel||("Maç "+r.matchId)):"Tüm maçlar";
-const sumText=r=>r.conditions.length?r.conditions.map(c=>`${LBL[c.metric]||c.metric} ${opT(c.op)} ${c.value}`).join(" ve "):"koşul yok";
-
-function body(r,i){
-  const missing=r.matchId&&!matches.some(m=>same(m.id,r.matchId));
-  const opts=`<option value="">Tüm maçlar</option>`
-    +(missing?`<option value="${esc(r.matchId)}" selected>${esc(r.matchLabel||r.matchId)} (listede yok)</option>`:"")
-    +matches.map(m=>`<option value="${esc(m.id)}" ${r.matchId&&same(m.id,r.matchId)?"selected":""}>${esc(m.home)} – ${esc(m.away)}${isLive(m)?` (${esc(m.minute)}')`:""}</option>`).join("");
-  return `<div class="rb">
-    <label class="f">Kural adı<input type="text" value="${esc(r.name)}" data-r="${i}" data-f="name"></label>
-    <label class="f">Çalışacağı maç<select data-r="${i}" data-f="target">${opts}</select></label>
-    <div class="f">Koşullar (hepsi doğru olunca bildirim gider)</div>
-    ${r.conditions.map((c,j)=>`<div class="c">
-      <select data-r="${i}" data-j="${j}" data-f="metric">${GROUPS.map(g=>`<optgroup label="${g[0]}">${g[1].map(m=>`<option value="${m[0]}" ${m[0]===c.metric?"selected":""}>${esc(LBL[m[0]])}</option>`).join("")}</optgroup>`).join("")}</select>
-      <select data-r="${i}" data-j="${j}" data-f="op">${OPV.map(o=>`<option value="${o[0]}" ${o[0]===c.op?"selected":""}>${esc(o[1])}</option>`).join("")}</select>
-      <input type="number" step="any" inputmode="decimal" value="${esc(c.value)}" data-r="${i}" data-j="${j}" data-f="value">
-      <button class="x" data-del="${i}.${j}" aria-label="Koşulu sil">✕</button>
-    </div>`).join("")}
-    <div class="row"><button class="ghost" data-addc="${i}">＋ Koşul</button><button class="x" data-delr="${i}">${r.draft?"Vazgeç":"Kuralı sil"}</button></div>
-    <div class="row"><span class="mute">${r.draft?"Kaydedilene kadar çalışmaz.":""}</span><button class="go" data-save="${esc(r.id)}">${r.draft?"Kaydet ve başlat":"Kaydet"}</button></div>
-  </div>`;
-}
-
-function renderRules(){
-  const L=rules.map((r,i)=>{
-    const o=open===r.id;
-    return `<div class="r ${r.enabled?"":"off"} ${r.draft?"dr":""}">
-      <div class="rh">
-        ${r.draft?'<span class="bd">TASLAK</span>':`<label class="sw"><input type="checkbox" data-en="${i}" ${r.enabled?"checked":""} aria-label="Kural açık"><span></span></label>`}
-        <div class="t" data-open="${esc(r.id)}"><div class="n">${esc(r.name)||"İsimsiz"}</div><div class="s">${r.matchId?"⚽ ":""}${target(r)} · ${esc(sumText(r))}</div></div>
-        <button class="chev" data-open="${esc(r.id)}" aria-label="Aç/kapat">${o?"▾":"▸"}</button>
-      </div>${o?body(r,i):""}</div>`}).join("");
-  $("pr").innerHTML=`<button class="ghost" data-newall>＋ Tüm maçlar için kural</button>`+(L||`<p class="empty">Kural yok. Maçlar sekmesinden bir maç seç ya da yukarıdan ekle.</p>`);
-}
-
-function render(){
-  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===tab));
-  $("pm").hidden=tab!=="m";$("pr").hidden=tab!=="r";
-  tab==="m"?renderMatches():renderRules();
-  status();
-}
-
-function addRule(m){
-  const lbl=m?`${m.home} – ${m.away}`:"";
-  const r={id:uid(),name:m?lbl:"Yeni kural",enabled:true,draft:true,matchId:m?String(m.id):null,matchLabel:lbl,conditions:[newCond()]};
-  rules.unshift(r);open=r.id;tab="r";render();window.scrollTo(0,0);
-}
-
-async function saveAll(activate){
-  const list=rules.filter(r=>!r.draft||r.id===activate);
-  const bad=list.find(r=>!r.conditions.length||r.conditions.some(c=>Number.isNaN(c.value)));
-  if(bad)return alert(`"${bad.name}" kuralında boş bir değer ya da koşul yok.`);
-  const payload=list.map(({draft,...r})=>r);
-  const r=await fetch("/api/rules",{method:"POST",headers:H(),body:JSON.stringify({rules:payload})});
-  if(!r.ok)return alert("Kaydedilemedi, şifreyi kontrol et.");
-  const a=rules.find(x=>x.id===activate);
-  if(a){a.draft=false;a.enabled=true;open=null}
-  dirty(false);render();toast(a?"Kural kaydedildi, çalışıyor ✅":"Kaydedildi ✅");
-}
-
-document.addEventListener("input",e=>{
-  const t=e.target,d=t.dataset;
-  if(d.en!==undefined){rules[d.en].enabled=t.checked;dirty(true);render();return}
-  if(d.r===undefined)return;
-  const r=rules[d.r];dirty(true);
-  if(d.j!==undefined){r.conditions[d.j][d.f]=d.f==="value"?parseFloat(t.value):t.value;return}
-  if(d.f==="target"){
-    const m=matches.find(x=>same(x.id,t.value));
-    const keep=t.value&&r.matchId&&same(r.matchId,t.value);
-    r.matchLabel=m?`${m.home} – ${m.away}`:(keep?r.matchLabel:"");
-    r.matchId=t.value||null;render();return;
-  }
-  r[d.f]=t.value;
-});
-document.addEventListener("click",e=>{
-  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om]");
-  if(!b)return;const d=b.dataset;
-  if(d.tab){tab=d.tab;render();return}
-  if(d.open){open=open===d.open?null:d.open;render();return}
-  if(d.newm!==undefined){addRule(matches.find(x=>same(x.id,d.newm))||null);return}
-  if(d.om!==undefined){openM=same(openM,d.om)?null:d.om;renderMatches();if(openM)loadDetail(openM);return}
-  if(d.newall!==undefined){addRule(null);return}
-  if(d.save){saveAll(d.save);return}
-  if(d.addc!==undefined){rules[d.addc].conditions.push(newCond());dirty(true);render();return}
-  if(d.del){const[i,j]=d.del.split(".");rules[i].conditions.splice(j,1);dirty(true);render();return}
-  if(d.delr!==undefined){const r=rules[d.delr];if(r.draft||confirm("Bu kural silinsin mi?")){rules.splice(d.delr,1);open=null;if(!r.draft)dirty(true);render()}}
-});
-$("q").oninput=renderMatches;
-
-$("save").onclick=()=>saveAll(null);
-$("test").onclick=async()=>{
-  const r=await fetch("/api/test",{method:"POST",headers:H()});
-  alert(r.ok?"Test mesajı gönderildi.":"Gönderilemedi.");
-};
-
-async function loadDetail(id){
-  try{const r=await fetch("/api/match/"+encodeURIComponent(id),{headers:H()});det[id]=r.ok?await r.json():{error:"Veri alınamadı"}}
-  catch{det[id]={error:"Bağlantı hatası"}}
-  if(tab==="m"&&same(openM,id))renderMatches();
-}
-async function loadMatches(){
-  try{
-    const r=await fetch("/api/matches",{headers:H()});
-    const d=await r.json();
-    matches=d.matches||[];updated=d.updated;err=d.error||"";
-  }catch{err="Bağlantı hatası"}
-  status();
-  if(tab==="m")renderMatches();
-  if(openM)loadDetail(openM);
-}
-
-(async()=>{
-  const r=await fetch("/api/rules",{headers:H()});
-  if(r.status===401){localStorage.removeItem("pw");alert("Şifre yanlış, sayfayı yenile.");return}
-  localStorage.setItem("pw",pw);
-  rules=(await r.json()).rules||[];
-  rules.forEach(x=>{x.conditions=x.conditions||[];if(x.matchId===undefined)x.matchId=null});
-  await loadMatches();render();
-  setInterval(loadMatches,15000);
-})();
-</script>
-</body>
-</html>
+const perT=c=>STAT.test(c.metric)&&c.period&&c.period!=="all"?(c.period==="last"?` (son ${c.last||10} dk)`:` (${PER.find(p=>p[0]===c.period)[1]})`):"";
+const winT=r=>(r.minFrom!=null||r.minTo!=null)?` · ${r.minFrom??""}–${r.minTo??""}'`:"";
+const

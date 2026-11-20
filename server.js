@@ -1,3 +1,4 @@
+
 import express from "express";
 import fs from "fs";
 import path from "path";
@@ -6,11 +7,11 @@ import { findTriggered, formatAlert, condsMatch, toMetrics, pkey } from "./rules
 const env = process.env;
 const { BOT_TOKEN, CHAT_ID, PANEL_PASSWORD, API_KEY, DATA_DIR = ".", TIMEZONE = "Europe/Istanbul", BOOKMAKER_ID = "8" } = env;
 const sec = (v, def, min) => Math.max(min, Number(v) || def);
-const POLL = 60;
-const STATS = 60;
-const STATS_BATCH_SIZE = 20;
-const FINAL_CHECK = 10 * 60;
-const REQUIRE_XG = true;
+const POLL = 60;                 // canlı maç listesi ve kontrol döngüsü: 60 saniye
+const STATS = 60;                // istatistik güncelleme kontrolü: 60 saniye
+const STATS_BATCH_SIZE = 20;    // /fixtures?ids= tek istekte en fazla 20 maç
+const FINAL_CHECK = 10 * 60;      // bildirimli maçların bitiş skorunu 10 dakikada bir kontrol et
+const REQUIRE_XG = true; // xG verisi olmayan maçlarda hiçbir bildirim gönderilmez.
 const LEAGUES = (env.LEAGUE_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
 
 if (!BOT_TOKEN || !CHAT_ID || !PANEL_PASSWORD) {
@@ -39,7 +40,7 @@ const saveNotifications = () => {
 const localDate = (d = new Date()) => new Intl.DateTimeFormat("sv-SE", { timeZone: TIMEZONE }).format(d);
 const FINISHED = new Set(["FT", "AET", "PEN", "AWD", "WO"]);
 
-let active = true;
+let active = true; // pasifken API'ye hiç sorgu atılmaz
 try { active = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")).active !== false; } catch {}
 
 // ---------- Telegram ----------
@@ -66,14 +67,14 @@ async function api(q) {
   return j.response || [];
 }
 
-// Toplu maç verisi
+// Toplu maç verisi: /fixtures?ids= ile en fazla 20 maçın istatistikleri tek istekte alınır.
 async function fetchStatsBatch(ids) {
   if (!ids.length) return new Map();
   const fixtures = await api(`/fixtures?ids=${ids.join("-")}&timezone=${encodeURIComponent(TIMEZONE)}`);
   return new Map(fixtures.map((f) => [Number(f.fixture?.id), f]));
 }
 
-// Gol olayları
+// Gol olayları (dakikalarıyla). Kendi kalesine golde taraf, güncel skorla eşleşen yönle belirlenir.
 async function fetchGoals(m) {
   const ev = (await api(`/fixtures/events?fixture=${m.id}`)).filter((e) => e.type === "Goal" && !/missed|cancel/i.test(e.detail || ""));
   const mk = (flip) => ev.map((e) => {
@@ -148,7 +149,7 @@ function oddsSet(bets, live) {
   return Object.values(o).some((v) => v) ? o : null;
 }
 
-// ---------- İstatistik ayrıştırma ----------
+// ---------- İstatistik ayrıştırma (tüm maç / 1. yarı / 2. yarı) ----------
 const FIELDS = [["shots", "Total Shots"], ["sot", "Shots on Goal"], ["xg", "expected_goals"], ["red", "Red Cards"]];
 const emptyBlock = () => ({ shots: {}, sot: {}, xg: {}, red: {} });
 const has = (b) => b.shots.home !== undefined;
@@ -165,9 +166,7 @@ function parseStats(resp, m) {
       out.lists[p][side] = list;
       for (const [k, type] of FIELDS) {
         const v = list.find((s) => s.type === type)?.value;
-        out[p][k][side] = k === "xg"
-          ? (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v))
-          : Number(v ?? 0);
+        out[p][k][side] = k === "xg" ? (v == null || v === "" || !Number.isFinite(Number(v)) ? null : Number(v)) : Number(v ?? 0);
       }
     };
     put("all", t.statistics);
@@ -177,6 +176,7 @@ function parseStats(resp, m) {
       else if (/2h|second|2nd/i.test(k)) put("h2", v);
     }
   }
+  // Eksik yarıyı tüm maçtan türet
   if (!has(out.h1) && (m.short === "1H" || m.short === "HT")) out.h1 = out.all;
   const mk = (x, y) => {
     const r = emptyBlock();
@@ -203,10 +203,12 @@ function rowsOf(S, p, m) {
 }
 const blk = (b) => ({ shots: b.shots, shotsOnTarget: b.sot, xg: b.xg, red: b.red });
 
-// ---------- Zaman pencereleri ----------
+// ---------- Zaman pencereleri: yarı, son N dk, dakika aralığı ----------
+// Şut/xG/kart: izlenen anlık kayıtlardan (geçmiş) hesaplanır. Gol: gol olaylarından.
 const copyB = (b) => ({ shots: { ...b.shots }, sot: { ...b.sot }, xg: { ...b.xg }, red: { ...b.red } });
 function record(x, m) {
   if (!x.stats || !has(x.stats.all)) return;
+  // Son 10 dakika tablosu için tam istatistik satırlarını da sakla.
   const rows = {
     home: (x.stats.lists?.all?.home || []).map((v) => ({ type: v.type, value: v.value })),
     away: (x.stats.lists?.all?.away || []).map((v) => ({ type: v.type, value: v.value })),
@@ -252,18 +254,14 @@ function rangeBlock(hist, curMin, cur, a, b) {
   const r = emptyWin();
   const end = curMin <= b ? cur : histAt(hist, b);
   const start = a <= 0 ? "zero" : histAt(hist, a);
-  if (!end || !start) return r;
+  if (!end || !start) return r; // yeterli geçmiş yok
   for (const [k, kk] of KEYS) for (const s of ["home", "away"]) {
     const e = end[kk][s], st = start === "zero" ? 0 : start[kk][s];
     r[k][s] = e == null || st == null ? null : Math.max(0, +(e - st).toFixed(3));
   }
   return r;
 }
-const cntGoals = (list, a, b) => {
-  const r = { home: 0, away: 0 };
-  for (const g of list) if (g.minute >= a && g.minute <= b) r[g.side]++;
-  return r;
-};
+const cntGoals = (list, a, b) => { const r = { home: 0, away: 0 }; for (const g of list) if (g.minute >= a && g.minute <= b) r[g.side]++; return r; };
 
 function buildWin(keys, m, x) {
   const S = x.stats, win = {};
@@ -294,10 +292,9 @@ function condInfo(conds) {
   }
   return { keys, goals };
 }
-const scopeConds = (rules, m) => rules
-  .filter((r) => !r.matchId || String(r.matchId) === String(m.id))
-  .flatMap((r) => r.conditions || []);
+const scopeConds = (rules, m) => rules.filter((r) => !r.matchId || String(r.matchId) === String(m.id)).flatMap((r) => r.conditions || []);
 
+// Bir maç için hangi veri gerektiğini kuralların metriklerinden çıkar.
 function needs(rules, m) {
   const conditions = rules
     .filter((r) => !r.matchId || String(r.matchId) === String(m.id))
@@ -325,6 +322,7 @@ function addNotification(m, rule, minute, sentAt) {
     scoreAt: { home: m.homeGoals ?? null, away: m.awayGoals ?? null },
     finalScore: null, finalStatus: null, finishedAt: null,
   });
+  // Dosyanın sınırsız büyümesini önle; yaklaşık son 1 yıllık geçmişi tut.
   const cutoff = Date.now() - 366 * 86400000;
   notifications = notifications.filter((n) => n.sentAt >= cutoff).slice(-30000);
   saveNotifications();
@@ -339,22 +337,23 @@ async function updateFinalScores() {
   const fixtures = await api(`/fixtures?ids=${ids.join("-")}&timezone=${encodeURIComponent(TIMEZONE)}`);
   let changed = false;
   for (const f of fixtures) {
-    const status = f.fixture?.status?.short;
-    if (!FINISHED.has(status)) continue;
-    const finalScore = { home: f.goals?.home ?? null, away: f.goals?.away ?? null };
-    const id = String(f.fixture.id);
-    for (const n of notifications) {
-      if (String(n.fixtureId) !== id || n.finalScore) continue;
-      n.finalScore = finalScore;
-      n.finalStatus = status;
-      n.finishedAt = Date.now();
-      changed = true;
-    }
-    const sm = schedule.find((m) => String(m.id) === id);
-    if (sm) {
-      sm.homeGoals = finalScore.home; sm.awayGoals = finalScore.away;
-      sm.short = status; sm.status = TR[status] || status; sm.inPlay = false;
-    }
+      const status = f.fixture?.status?.short;
+      if (!FINISHED.has(status)) continue;
+      const finalScore = { home: f.goals?.home ?? null, away: f.goals?.away ?? null };
+      const id = String(f.fixture.id);
+      for (const n of notifications) {
+        if (String(n.fixtureId) !== id || n.finalScore) continue;
+        n.finalScore = finalScore;
+        n.finalStatus = status;
+        n.finishedAt = Date.now();
+        changed = true;
+      }
+      // Günlük fikstür kaydını da final skorla güncelle.
+      const sm = schedule.find((m) => String(m.id) === id);
+      if (sm) {
+        sm.homeGoals = finalScore.home; sm.awayGoals = finalScore.away;
+        sm.short = status; sm.status = TR[status] || status; sm.inPlay = false;
+      }
   }
   if (changed) saveNotifications();
 }
@@ -369,6 +368,7 @@ async function poll() {
     const now = Date.now();
     const rules = loadRules().filter((r) => r.enabled && !r.draft);
 
+    // Günlük fikstür yalnızca yerel gün değişince yenilenir.
     const day = today();
     if (scheduleDate !== day) {
       try {
@@ -378,6 +378,7 @@ async function poll() {
       } catch (e) { warns.push(`Fikstür: ${e.message}`); }
     }
 
+    // Canlı maç listesi dakikada bir güncellenir.
     await safe(async () => {
       const list = (await api(`/fixtures?live=${LEAGUES.length ? LEAGUES.join("-") : "all"}`)).filter(wanted).map(norm);
       liveMap = new Map(list.map((m) => [m.id, m]));
@@ -388,9 +389,11 @@ async function poll() {
     const all = [...byId.values()];
     const playing = all.filter((m) => m.inPlay);
 
+    // Filtreler yalnızca bu önbelleği okur; filtre isteği hiçbir API sorgusu başlatmaz.
     const statCandidates = playing.filter((m) => RUNNING.has(m.short))
       .map((m) => ({ m, x: extra.get(m.id) || {} }))
       .sort((a, b) => (a.x.statsAt || 0) - (b.x.statsAt || 0));
+    // Tüm canlı maçların istatistikleri toplu çekilir: her 20 maç için 1 API isteği.
     const statTasks = [];
     let statsBatchCount = 0;
     for (let i = 0; i < statCandidates.length; i += STATS_BATCH_SIZE) {
@@ -406,6 +409,7 @@ async function poll() {
           const fixture = byFixture.get(Number(m.id));
           if (!fixture) continue;
           x.stats = parseStats(fixture.statistics || [], m);
+          // Toplu fixture yanıtı olayları da içeriyorsa, gol koşulları için sakla.
           if (Array.isArray(fixture.events)) {
             x.events = fixture.events;
             const goalEvents = fixture.events.filter((e) => e.type === "Goal" && !/missed|cancel/i.test(e.detail || ""));
@@ -426,7 +430,7 @@ async function poll() {
       }));
     }
 
-    // Gol dakikası gereken kurallar için olay verisi
+    // Gol dakikası gereken kurallar için olay verisi; yalnızca skor değiştiğinde.
     const otherTasks = [];
     let preBudget = 1, eventBudget = 1;
     for (const m of all) {
@@ -454,7 +458,7 @@ async function poll() {
 
     await Promise.all([...statTasks, ...otherTasks]);
 
-    // xG iki takım için de sayısal değilse hiçbir bildirim gönderilmez.
+    // Bildirim kuralları. En az bir takımda sayısal xG varsa maç xG verisine sahip kabul edilir.
     let xgBlocked = 0;
     for (const m of playing) {
       const x = extra.get(m.id) || {};
@@ -463,8 +467,9 @@ async function poll() {
       if (!relevant.length) continue;
       const homeXg = S?.all?.xg?.home;
       const awayXg = S?.all?.xg?.away;
-      const hasXg = homeXg !== null && homeXg !== undefined && awayXg !== null && awayXg !== undefined &&
-        Number.isFinite(Number(homeXg)) && Number.isFinite(Number(awayXg));
+      const homeHasXg = homeXg !== null && homeXg !== undefined && Number.isFinite(Number(homeXg));
+      const awayHasXg = awayXg !== null && awayXg !== undefined && Number.isFinite(Number(awayXg));
+      const hasXg = homeHasXg || awayHasXg;
       if (!hasXg) {
         xgBlocked++;
         continue;
@@ -492,6 +497,7 @@ async function poll() {
       }
     }
 
+    // Bildirim giden maçların nihai skorlarını toplu sorguyla al.
     if (now - finalCheckAt >= FINAL_CHECK * 1000) {
       finalCheckAt = now;
       await safe(updateFinalScores);
@@ -508,11 +514,10 @@ async function poll() {
     polling = false;
   }
 }
-
 poll();
 setInterval(poll, POLL * 1000);
 
-// Maç detayı sadece önbellekten üretilir
+// Maç detayı sadece önbellekten üretilir; API çağrısı yapmaz.
 function detail(m) {
   const x = extra.get(m.id) || {};
   const S = x.stats;
@@ -587,7 +592,7 @@ app.get("/api/notifications/match/:id", auth, (req, res) => {
   res.json({ items });
 });
 
-// Filtre yalnızca önbellek verisini değerlendirir
+// Filtre yalnızca en son alınmış önbellek verisini değerlendirir; API çağrısı yoktur.
 const OPSET = new Set([">=", ">", "<=", "<", "=="]);
 const ALLOWED = /^((home|away|total)_(goals|shots|sot|xg|red)|goal_diff|minute)$/;
 const cleanCond = (c) => ({
@@ -621,13 +626,8 @@ app.post("/api/filter", auth, (req, res) => {
 });
 
 app.post("/api/test", auth, async (req, res) => {
-  try {
-    await sendTelegram("✅ Test mesajı: bağlantı çalışıyor.");
-    res.json({ ok: true });
-  } catch (e) {
-    console.error(e.message);
-    res.status(500).json({ error: "gönderilemedi" });
-  }
+  try { await sendTelegram("✅ Test mesajı: bağlantı çalışıyor."); res.json({ ok: true }); }
+  catch (e) { console.error(e.message); res.status(500).json({ error: "gönderilemedi" }); }
 });
 
 app.listen(process.env.PORT || 3000, () => console.log("Panel hazır. Durum:", active ? "AKTİF" : "PASİF"));

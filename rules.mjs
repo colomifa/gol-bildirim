@@ -3,12 +3,19 @@ const add = (a, b) => (a === null || b === null ? null : a + b);
 const sub = (a, b) => (a === null || b === null ? null : a - b);
 const esc = (s) => String(s ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 
-// Dönem anahtarı: "all" | "h1" | "h2" | "l<N>" (son N dakika)
-const pkey = (c) => (c.period === "last" ? "l" + Math.max(1, Number(c.last) || 10) : c.period || "all");
+// Zaman anahtarı: "all" | "h1" | "h2" | "l<N>" (son N dk) | "r<a>-<b>" (dakika aralığı)
+export const pkey = (c) => {
+  const p = c.period || "all";
+  if (p === "last") return "l" + Math.max(1, Number(c.last) || 10);
+  if (p === "range") return `r${Number(c.from) || 0}-${Number(c.to) || 200}`;
+  return p;
+};
 
-export function toMetrics(m, period = "all") {
-  const s = period === "h1" ? m.h1 || {} : period === "h2" ? m.h2 || {} : period.startsWith("l") ? m.lastWin?.[period] || {} : m;
-  const hg = num(m.homeGoals), ag = num(m.awayGoals);
+// key != "all" ise gol, şut, xG ve kırmızı kart değerleri m.win[key] içinden okunur
+export function toMetrics(m, key = "all") {
+  const s = key === "all" ? m : m.win?.[key] || {};
+  const hg = num(key === "all" ? m.homeGoals : s.goals?.home);
+  const ag = num(key === "all" ? m.awayGoals : s.goals?.away);
   const hx = num(s.xg?.home), ax = num(s.xg?.away);
   const hs = num(s.shots?.home), as = num(s.shots?.away);
   const ht = num(s.shotsOnTarget?.home), at = num(s.shotsOnTarget?.away);
@@ -33,18 +40,23 @@ const OPS = {
   "==": (a, b) => a === b,
 };
 
+// Koşulların hepsi doğru mu? (kurallar ve canlı filtre ortak kullanır)
+export function condsMatch(conditions, match) {
+  const cache = {};
+  return conditions.every((c) => {
+    const p = pkey(c);
+    const v = (cache[p] ||= toMetrics(match, p))[c.metric];
+    return v !== null && v !== undefined && !Number.isNaN(v) && OPS[c.op]?.(v, Number(c.value));
+  });
+}
+
 export function ruleMatches(rule, match) {
   if (!rule.enabled || rule.draft || !rule.conditions?.length) return false;
   const min = num(match.minute);
   const from = num(rule.minFrom), to = num(rule.minTo);
   if (from !== null && (min === null || min < from)) return false;
   if (to !== null && (min === null || min > to)) return false;
-  const cache = {};
-  return rule.conditions.every((c) => {
-    const p = pkey(c);
-    const v = (cache[p] ||= toMetrics(match, p))[c.metric];
-    return v !== null && v !== undefined && !Number.isNaN(v) && OPS[c.op]?.(v, Number(c.value));
-  });
+  return condsMatch(rule.conditions, match);
 }
 
 // Aynı maç + aynı koşullar + aynı dakika aralığı = aynı bildirim (kural adı önemli değil)

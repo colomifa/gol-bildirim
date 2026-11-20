@@ -1,425 +1,680 @@
-<!doctype html>
-<html lang="tr">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Kural Paneli</title>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
-<style>
-:root{--bg:#0d1117;--p:#151b23;--p2:#1d2531;--line:#2a3444;--ink:#e8edf3;--mute:#8a97a8;--acc:#f5b83d;--live:#e5484d;--ok:#3ddc84;color-scheme:dark}
-*{box-sizing:border-box;margin:0}
-[hidden]{display:none!important}
-body{background:var(--bg);color:var(--ink);font:14px/1.35 "IBM Plex Sans",system-ui,sans-serif;padding-bottom:calc(70px + env(safe-area-inset-bottom,0px))}
-button{font:inherit;color:inherit;cursor:pointer;background:none;border:0}
-select,input{font:inherit;color:var(--ink);background:var(--p2);border:1px solid var(--line);border-radius:4px;padding:7px 8px;width:100%;min-width:0}
-:focus-visible{outline:2px solid var(--acc);outline-offset:1px}
-.mono{font-family:"IBM Plex Mono",ui-monospace,monospace}
-header{position:sticky;top:0;z-index:5;background:var(--bg);border-bottom:1px solid var(--line);padding:calc(8px + env(safe-area-inset-top,0px)) 12px 0}
-.w{max-width:640px;margin:0 auto}
-.top{display:flex;justify-content:space-between;align-items:center;gap:8px}
-h1{font:600 14px "IBM Plex Mono",monospace;letter-spacing:.06em;text-transform:uppercase}
-.rt{display:flex;align-items:center;gap:10px;min-width:0}
-.st{font-size:12px;color:var(--mute);display:flex;align-items:center;gap:6px;min-width:0}
-#stt{max-width:130px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.dot{width:7px;height:7px;border-radius:50%;background:var(--mute);flex:none}.dot.ok{background:var(--ok)}
-.pill{font:600 11px "IBM Plex Mono",monospace;letter-spacing:.05em;border-radius:12px;padding:5px 10px;border:1px solid var(--ok);color:var(--ok);white-space:nowrap}
-.pill.off{border-color:var(--live);color:var(--live);background:rgba(229,72,77,.12)}
-nav{display:flex;margin-top:4px}
-nav button{flex:1;padding:9px 0;color:var(--mute);border-bottom:2px solid transparent;font-weight:500}
-nav button.on{color:var(--acc);border-color:var(--acc)}
-nav b{font:600 11px "IBM Plex Mono",monospace;background:var(--p2);border-radius:8px;padding:1px 6px;margin-left:4px}
-main{max-width:640px;margin:0 auto;padding:10px 12px}
-.empty{color:var(--mute);padding:28px 8px;text-align:center}
-.mute{color:var(--mute);font-size:12px;margin-top:6px}
-.note{background:rgba(229,72,77,.12);border:1px solid var(--live);color:var(--live);border-radius:5px;padding:8px 10px;margin-bottom:8px;font-size:13px}
-#q{margin-bottom:6px}
-.mw{border-bottom:1px solid var(--line)}
-.m{display:grid;grid-template-columns:44px 1fr auto;gap:10px;align-items:center;padding:8px 2px;cursor:pointer}
-.min{font:600 12px "IBM Plex Mono",monospace;text-align:center;border-radius:3px;padding:4px 0;background:var(--p2);color:var(--mute)}
-.min.live{background:var(--live);color:#fff}
-.tm{display:flex;justify-content:space-between;gap:8px;min-width:0}
-.tm span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.tm b{font-weight:600}
-.xl{color:var(--mute);font:500 11px "IBM Plex Mono",monospace;margin-top:2px}
-.xl b{color:var(--acc)}
-.add{display:flex;align-items:center;gap:4px;min-width:40px;height:34px;justify-content:center;border:1px solid var(--line);border-radius:5px;color:var(--acc);font-size:16px}
-.add i{font:600 11px "IBM Plex Mono",monospace;font-style:normal;background:var(--acc);color:#111;border-radius:8px;padding:0 5px}
-.fp{background:var(--p);border:1px solid var(--line);border-radius:6px;padding:10px;margin-bottom:10px}
-.dt{background:var(--p);border:1px solid var(--line);border-radius:6px;padding:10px;margin:0 0 10px}
-.dt table{width:100%;border-collapse:collapse;font-size:13px}
-.dt th{color:var(--mute);font-weight:500;font-size:11px;text-align:center;padding:2px}
-.dt td{padding:5px 2px;text-align:center;border-top:1px solid var(--line)}
-.dt td:first-child{text-align:left;color:var(--mute)}
-.dt .tot{margin:10px 0 6px;font-size:13px}
-.dt .sx td:first-child,.dt .sx td:last-child{font:600 13px "IBM Plex Mono",monospace;width:25%;color:var(--ink);text-align:center}
-.dt .sx td:nth-child(2){color:var(--mute)}
-.pt{display:flex;gap:6px;margin:10px 0 4px}
-.pt button{flex:1;border:1px solid var(--line);border-radius:5px;padding:6px 0;color:var(--mute);font-size:13px}
-.pt button.on{border-color:var(--acc);color:var(--acc)}
-.r{background:var(--p);border:1px solid var(--line);border-radius:6px;margin-bottom:6px}
-.r.off .t{opacity:.5}
-.r.dr{border-style:dashed;border-color:var(--acc)}
-.rh{display:grid;grid-template-columns:auto 1fr auto;gap:10px;align-items:center;padding:8px 10px}
-.t{min-width:0;cursor:pointer}
-.n{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.s{color:var(--mute);font-size:12px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.bd{font:600 10px "IBM Plex Mono",monospace;background:var(--acc);color:#111;border-radius:3px;padding:3px 5px;letter-spacing:.04em}
-.chev{color:var(--mute);padding:4px 6px}
-.rb{padding:2px 10px 10px;border-top:1px solid var(--line)}
-.f{display:block;color:var(--mute);font-size:12px;margin:10px 0 4px}
-.mm{display:grid;grid-template-columns:1fr auto 1fr;gap:6px;align-items:center;color:var(--mute)}
-.c{display:grid;grid-template-columns:1fr 54px 66px 28px;gap:5px;margin-bottom:5px}
-.c.one{grid-template-columns:1fr}
-.c .pr{grid-column:1/-1;margin-bottom:3px;display:flex;gap:6px;align-items:center}
-.c .pr select{flex:1}
-.c .pr input{width:64px;flex:none}
-.x{color:var(--live)}
-.ghost{border:1px solid var(--line);border-radius:5px;padding:8px 12px;color:var(--acc);margin-bottom:8px}
-.row{display:flex;justify-content:space-between;align-items:center;margin-top:8px;gap:8px}
-.go{background:var(--acc);color:#111;font-weight:600;border-radius:5px;padding:9px 14px}
-.sw{position:relative;width:34px;height:20px;flex:none}
-.sw input{position:absolute;opacity:0;inset:0;width:100%;height:100%;margin:0;padding:0;cursor:pointer}
-.sw span{position:absolute;inset:0;background:var(--line);border-radius:10px;transition:.15s;pointer-events:none}
-.sw span::after{content:"";position:absolute;left:2px;top:2px;width:16px;height:16px;border-radius:50%;background:#fff;transition:.15s}
-.sw input:checked+span{background:var(--ok)}
-.sw input:checked+span::after{transform:translateX(14px)}
-.bar{position:fixed;left:0;right:0;bottom:0;background:var(--p);border-top:1px solid var(--line);padding:8px 12px calc(8px + env(safe-area-inset-bottom,0px));display:flex;gap:8px;justify-content:center}
-.bar button{border:1px solid var(--line);border-radius:5px;padding:10px 18px;font-weight:600}
-.bar #save{background:var(--acc);border-color:var(--acc);color:#111}
-#toast{position:fixed;left:50%;bottom:calc(76px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ok);color:#06210f;font-weight:600;padding:8px 14px;border-radius:6px;opacity:0;pointer-events:none;transition:.2s;z-index:9;max-width:90vw;text-align:center}
-#toast.on{opacity:1}
-@media(max-width:420px){.c{grid-template-columns:1fr 1fr 28px}.c.one{grid-template-columns:1fr}.c select:first-child{grid-column:1/-1}#stt{max-width:80px}}
-</style>
-</head>
-<body>
-<header><div class="w">
-  <div class="top"><h1>Gol Paneli</h1>
-    <div class="rt"><div class="st"><span class="dot" id="dot"></span><span id="stt">...</span></div><button class="pill" id="act">● AKTİF</button></div>
-  </div>
-  <nav>
-    <button data-tab="m" class="on">Maçlar <b id="nm">0</b></button>
-    <button data-tab="r">Kurallar <b id="nr">0</b></button>
-  </nav>
-</div></header>
-<main>
-  <div id="pm">
-    <div id="note" class="note" hidden>Pasif: API'ye sorgu atılmıyor, bildirim gitmiyor. Liste güncellenmez.</div>
-    <button class="ghost" id="fbtn">Canlı filtre</button>
-    <div id="fpanel" class="fp" hidden></div>
-    <input id="q" type="search" placeholder="Takım ara...">
-    <div id="list"></div>
-  </div>
-  <div id="pr" hidden></div>
-</main>
-<div class="bar"><button id="save">Kaydet</button><button id="test">Test mesajı</button></div>
-<div id="toast"></div>
 
-<script>
-window.onerror=function(m,s,l){document.body.insertAdjacentHTML("afterbegin",'<div style="background:#b3261e;color:#fff;padding:8px;font:12px monospace">JS hatası: '+m+' (satır '+l+')</div>')};
-</script>
-<script>
-const GROUPS=[
- ["Maç önü oranı",[["pre_home","Ev"],["pre_draw","Beraberlik"],["pre_away","Deplasman"],["pre_over25","2.5 Üst"]]],
- ["Canlı oran",[["live_home","Ev"],["live_draw","Beraberlik"],["live_away","Deplasman"],["live_over25","2.5 Üst"]]],
- ["Skor",[["home_goals","Ev gol"],["away_goals","Dep gol"],["total_goals","Toplam gol"],["goal_diff","Fark (ev-dep)"]]],
- ["Şut",[["home_shots","Ev şut"],["away_shots","Dep şut"],["total_shots","Toplam şut"],["home_sot","Ev isabetli"],["away_sot","Dep isabetli"],["total_sot","Toplam isabetli"]]],
- ["xG",[["home_xg","Ev"],["away_xg","Dep"],["total_xg","Toplam"]]],
- ["Kırmızı kart",[["home_red","Ev"],["away_red","Dep"],["total_red","Toplam"]]],
- ["Zaman",[["minute","Dakika"]]]
-];
-const FG=GROUPS.filter(g=>["Skor","Şut","xG","Kırmızı kart","Zaman"].includes(g[0]));
-const LBL={};GROUPS.forEach(g=>g[1].forEach(m=>LBL[m[0]]=g[0]+" · "+m[1]));
-const OPV=[[">=","≥"],[">",">"],["<=","≤"],["<","<"],["==","="]];
-const PER=[["all","Tüm maç"],["h1","1. yarı"],["h2","2. yarı"],["last","Son N dakika"],["range","Dakika aralığı"]];
-const TABS=[["all","Tümü"],["h1","1. yarı"],["h2","2. yarı"],["l10","Son 10 dk"]];
-const SORTM=[["","Sıralama yok"],["total_xg","Toplam xG"],["home_xg","Ev xG"],["away_xg","Dep xG"],["total_shots","Toplam şut"],["home_shots","Ev şut"],["away_shots","Dep şut"],["total_sot","Toplam isabetli şut"],["total_goals","Toplam gol"]];
-const SCOPE=/goals|goal_diff|shots|sot|xg|red/;
-const SN={"Shots on Goal":"İsabetli şut","Shots off Goal":"İsabetsiz şut","Total Shots":"Toplam şut","Blocked Shots":"Engellenen şut","Shots insidebox":"Ceza sahası içi şut","Shots outsidebox":"Ceza sahası dışı şut","Fouls":"Faul","Corner Kicks":"Korner","Offsides":"Ofsayt","Ball Possession":"Topla oynama","Yellow Cards":"Sarı kart","Red Cards":"Kırmızı kart","Goalkeeper Saves":"Kaleci kurtarışı","Total passes":"Toplam pas","Passes accurate":"İsabetli pas","Passes %":"Pas isabeti","expected_goals":"Gol beklentisi (xG)","goals_prevented":"Önlenen gol"};
-
-const $=id=>document.getElementById(id);
-let rules=[],matches=[],updated=null,err="",active=true,tab="m",open=null,openM=null,dper="all",det={},isDirty=false;
-const defSort=()=>({metric:"",period:"all",last:10,from:60,to:90});
-let flt;try{flt=JSON.parse(localStorage.getItem("flt")||"null")}catch{flt=null}
-if(!flt||!Array.isArray(flt.conditions))flt={on:false,conditions:[],sort:defSort()};
-if(!flt.sort)flt.sort=defSort();
-let fres=null,fopen=false;
-const saveFlt=()=>{try{localStorage.setItem("flt",JSON.stringify(flt))}catch{}};
-let pw=localStorage.getItem("pw")||prompt("Panel şifresi:");
-const H=()=>({"Content-Type":"application/json","x-password":pw});
-const uid=()=>Math.random().toString(36).slice(2,9);
-const esc=s=>String(s==null?"":s).replace(/[&<>"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
-const newCond=()=>({metric:"pre_home",op:">=",value:1.5,period:"all"});
-const newF=()=>({metric:"total_xg",op:">=",value:1,period:"all"});
-const opT=o=>(OPV.find(x=>x[0]===o)||[0,o])[1];
-const isLive=m=>!m.status&&Number(m.minute)>0;
-const same=(a,b)=>String(a)===String(b);
-const unsaved=()=>isDirty||rules.some(r=>r.draft);
-function dirty(v){isDirty=v;$("save").textContent=v?"Kaydet •":"Kaydet"}
-window.onbeforeunload=()=>unsaved()?"Kaydedilmemiş değişiklik var":undefined;
-let tt;function toast(t){const e=$("toast");e.textContent=t;e.classList.add("on");clearTimeout(tt);tt=setTimeout(()=>e.classList.remove("on"),2400)}
-
-function status(){
-  $("dot").className="dot"+(active&&updated&&!err?" ok":"");
-  $("stt").textContent=!active?"pasif":err||(updated?new Date(updated).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit",second:"2-digit"}):"bekleniyor");
-  $("act").textContent=active?"● AKTİF":"○ PASİF";
-  $("act").className="pill"+(active?"":" off");
-  $("note").hidden=active;
-  $("nm").textContent=matches.length;$("nr").textContent=rules.length;
+:root {
+  --bg: #080d18;
+  --p: #111a2a;
+  --p2: #182438;
+  --line: #26364d;
+  --ink: #f1f5fb;
+  --mute: #8999af;
+  --acc: #b9f35a;
+  --live: #ff5364;
+  --ok: #45d69a;
+  --blue: #5b9cff;
+  color-scheme: dark;
 }
 
-// ---- Ortak koşul düzenleyici (kurallar ve filtre) ----
-function perHtml(c,at){
-  if(!SCOPE.test(c.metric))return "";
-  const p=c.period||"all";
-  return `<div class="pr"><select ${at} data-f="period" aria-label="Zaman">${PER.map(x=>`<option value="${x[0]}" ${p===x[0]?"selected":""}>Zaman: ${x[1]}</option>`).join("")}</select>`
-   +(p==="last"?`<input type="number" min="1" inputmode="numeric" value="${esc(c.last??10)}" ${at} data-f="last" aria-label="Dakika"><span class="mute">dk</span>`:"")
-   +(p==="range"?`<input type="number" min="0" inputmode="numeric" value="${esc(c.from??60)}" ${at} data-f="from" aria-label="Başlangıç"><span class="mute">–</span><input type="number" min="0" inputmode="numeric" value="${esc(c.to??90)}" ${at} data-f="to" aria-label="Bitiş"><span class="mute">dk</span>`:"")
-   +`</div>`;
+* {
+  box-sizing: border-box;
+  margin: 0;
 }
-function condRow(c,at,del,groups){
-  return `<div class="c">
-    <select ${at} data-f="metric">${groups.map(g=>`<optgroup label="${g[0]}">${g[1].map(m=>`<option value="${m[0]}" ${m[0]===c.metric?"selected":""}>${esc(LBL[m[0]])}</option>`).join("")}</optgroup>`).join("")}</select>
-    <select ${at} data-f="op">${OPV.map(o=>`<option value="${o[0]}" ${o[0]===c.op?"selected":""}>${esc(o[1])}</option>`).join("")}</select>
-    <input type="number" step="any" inputmode="decimal" value="${esc(c.value)}" ${at} data-f="value">
-    <button class="x" ${del} aria-label="Koşulu sil">✕</button>
-    ${perHtml(c,at)}
-  </div>`;
+
+[hidden] {
+  display: none !important;
 }
-function setField(c,f,v){
-  c[f]=["value","last","from","to"].includes(f)?parseFloat(v):v;
-  if(f==="period"){
-    if(v==="last"&&!(c.last>0))c.last=10;
-    if(v==="range"){if(!(c.from>=0))c.from=60;if(!(c.to>0))c.to=90}
+
+body {
+  background:
+    radial-gradient(ellipse at 50% -20%, #172b48 0%, transparent 55%),
+    var(--bg);
+  color: var(--ink);
+  font: 14px/1.5 Inter, system-ui, sans-serif;
+  padding-bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+}
+
+button {
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+  background: none;
+  border: 0;
+  transition: .18s ease;
+}
+
+button:active {
+  transform: scale(.97);
+}
+
+select,
+input {
+  font: inherit;
+  color: var(--ink);
+  background: #172338;
+  border: 1px solid #2b3c55;
+  border-radius: 9px;
+  padding: 10px 12px;
+  width: 100%;
+  min-width: 0;
+}
+
+select:focus,
+input:focus {
+  border-color: var(--acc);
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--acc);
+  outline-offset: 2px;
+}
+
+.mono {
+  font-family: "IBM Plex Mono", monospace;
+  font-variant-numeric: tabular-nums;
+}
+
+header {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: rgba(8, 13, 24, .92);
+  backdrop-filter: blur(18px);
+  border-bottom: 1px solid rgba(137, 153, 175, .14);
+  padding: calc(15px + env(safe-area-inset-top, 0px)) 16px 0;
+}
+
+.w,
+main {
+  max-width: 760px;
+  margin: 0 auto;
+}
+
+.top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  min-height: 42px;
+}
+
+h1 {
+  font-size: 19px;
+  font-weight: 800;
+  letter-spacing: -.7px;
+}
+
+.rt {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-width: 0;
+}
+
+.st {
+  font-size: 11px;
+  color: var(--mute);
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+}
+
+#stt {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--mute);
+  flex: none;
+}
+
+.dot.ok {
+  background: var(--ok);
+  box-shadow: 0 0 12px rgba(69, 214, 154, .65);
+}
+
+.pill {
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: .6px;
+  border-radius: 20px;
+  padding: 7px 12px;
+  border: 1px solid rgba(69, 214, 154, .4);
+  color: var(--ok);
+  background: rgba(69, 214, 154, .08);
+  white-space: nowrap;
+}
+
+.pill.off {
+  border-color: rgba(255, 83, 100, .4);
+  color: var(--live);
+  background: rgba(255, 83, 100, .1);
+}
+
+nav {
+  display: flex;
+  margin-top: 15px;
+  gap: 8px;
+}
+
+nav button {
+  flex: 1;
+  padding: 12px 8px;
+  color: var(--mute);
+  border-bottom: 2px solid transparent;
+  font-weight: 650;
+  font-size: 13px;
+}
+
+nav button.on {
+  color: var(--acc);
+  border-color: var(--acc);
+}
+
+nav b {
+  font-size: 10px;
+  background: #26354a;
+  border-radius: 20px;
+  padding: 2px 7px;
+  margin-left: 5px;
+}
+
+main {
+  padding: 18px 16px;
+}
+
+.empty {
+  color: var(--mute);
+  padding: 45px 12px;
+  text-align: center;
+  background: rgba(17, 26, 42, .65);
+  border: 1px dashed var(--line);
+  border-radius: 14px;
+}
+
+.mute {
+  color: var(--mute);
+  font-size: 12px;
+  margin-top: 6px;
+}
+
+.note {
+  background: rgba(255, 83, 100, .09);
+  border: 1px solid rgba(255, 83, 100, .35);
+  color: #ff8792;
+  border-radius: 10px;
+  padding: 11px 13px;
+  margin-bottom: 12px;
+  font-size: 12px;
+}
+
+#q {
+  margin-bottom: 12px;
+  padding: 13px 15px;
+  background: #111b2c;
+  border-radius: 11px;
+}
+
+.mw {
+  background: linear-gradient(145deg, #121e31, #0e1727);
+  border: 1px solid #26364d;
+  border-radius: 13px;
+  margin-bottom: 9px;
+  overflow: hidden;
+  transition: border-color .2s, transform .2s;
+}
+
+.mw:has(.min.live) {
+  border-color: rgba(255, 83, 100, .35);
+}
+
+.m {
+  display: grid;
+  grid-template-columns: 48px 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 13px 12px;
+  cursor: pointer;
+}
+
+.m:hover {
+  background: rgba(255, 255, 255, .025);
+}
+
+.min {
+  font: 700 11px "IBM Plex Mono", monospace;
+  text-align: center;
+  border-radius: 8px;
+  padding: 7px 3px;
+  background: #202e43;
+  color: var(--mute);
+}
+
+.min.live {
+  background: rgba(255, 83, 100, .16);
+  color: #ff6b7b;
+  border: 1px solid rgba(255, 83, 100, .35);
+}
+
+.tm {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 2px 0;
+}
+
+.tm span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.tm b {
+  font-weight: 800;
+  min-width: 18px;
+  text-align: center;
+}
+
+.xl {
+  color: var(--mute);
+  font: 500 10px "IBM Plex Mono", monospace;
+  margin-top: 5px;
+}
+
+.xl b {
+  color: var(--acc);
+}
+
+.add {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 39px;
+  height: 37px;
+  justify-content: center;
+  border: 1px solid #344862;
+  border-radius: 9px;
+  color: var(--acc);
+  font-size: 19px;
+  background: #1a2940;
+}
+
+.add:hover {
+  background: rgba(185, 243, 90, .12);
+  border-color: var(--acc);
+}
+
+.add i {
+  font: 700 10px "IBM Plex Mono", monospace;
+  font-style: normal;
+  background: var(--acc);
+  color: #10180a;
+  border-radius: 10px;
+  padding: 1px 6px;
+}
+
+.fp,
+.dt {
+  background: #111b2c;
+  border: 1px solid #2a3b54;
+  border-radius: 12px;
+  padding: 13px;
+  margin-bottom: 12px;
+}
+
+.dt table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.dt th {
+  color: var(--mute);
+  font-weight: 600;
+  font-size: 10px;
+  text-align: center;
+  padding: 5px 2px;
+}
+
+.dt td {
+  padding: 9px 3px;
+  text-align: center;
+  border-top: 1px solid var(--line);
+}
+
+.dt td:first-child {
+  text-align: left;
+  color: var(--mute);
+}
+
+.dt .tot {
+  margin: 13px 0 8px;
+  font-size: 12px;
+  color: var(--mute);
+}
+
+.dt .tot b {
+  color: var(--acc);
+}
+
+.dt .sx td:first-child,
+.dt .sx td:last-child {
+  font: 700 12px "IBM Plex Mono", monospace;
+  width: 25%;
+  color: var(--ink);
+  text-align: center;
+}
+
+.dt .sx td:nth-child(2) {
+  color: var(--mute);
+}
+
+.pt {
+  display: flex;
+  gap: 6px;
+  margin: 13px 0 5px;
+}
+
+.pt button {
+  flex: 1;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 3px;
+  color: var(--mute);
+  font-size: 11px;
+}
+
+.pt button.on {
+  border-color: var(--acc);
+  color: var(--acc);
+  background: rgba(185, 243, 90, .08);
+}
+
+.r {
+  background: linear-gradient(145deg, #121e31, #0f1929);
+  border: 1px solid #293a52;
+  border-radius: 12px;
+  margin-bottom: 10px;
+  overflow: hidden;
+}
+
+.r.off .t {
+  opacity: .45;
+}
+
+.r.dr {
+  border-style: dashed;
+  border-color: var(--acc);
+}
+
+.rh {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 12px;
+  align-items: center;
+  padding: 13px;
+}
+
+.t {
+  min-width: 0;
+  cursor: pointer;
+}
+
+.n {
+  font-weight: 750;
+  font-size: 13px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.s {
+  color: var(--mute);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  margin-top: 3px;
+}
+
+.bd {
+  font: 700 9px "IBM Plex Mono", monospace;
+  background: rgba(185, 243, 90, .14);
+  color: var(--acc);
+  border: 1px solid rgba(185, 243, 90, .3);
+  border-radius: 5px;
+  padding: 4px 7px;
+}
+
+.chev {
+  color: var(--mute);
+  padding: 5px 8px;
+}
+
+.rb {
+  padding: 5px 13px 14px;
+  border-top: 1px solid var(--line);
+}
+
+.f {
+  display: block;
+  color: var(--mute);
+  font-size: 11px;
+  font-weight: 600;
+  margin: 13px 0 6px;
+}
+
+.mm {
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  gap: 8px;
+  align-items: center;
+  color: var(--mute);
+}
+
+.c {
+  display: grid;
+  grid-template-columns: 1fr 58px 76px 30px;
+  gap: 7px;
+  margin-bottom: 8px;
+}
+
+.c.one {
+  grid-template-columns: 1fr;
+}
+
+.c .pr {
+  grid-column: 1 / -1;
+  margin-bottom: 3px;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.c .pr select {
+  flex: 1;
+}
+
+.c .pr input {
+  width: 68px;
+  flex: none;
+}
+
+.x {
+  color: var(--live);
+}
+
+.ghost {
+  border: 1px solid #344761;
+  border-radius: 9px;
+  padding: 9px 13px;
+  color: var(--acc);
+  margin-bottom: 9px;
+  background: rgba(185, 243, 90, .04);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.ghost:hover {
+  background: rgba(185, 243, 90, .1);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-top: 10px;
+  gap: 9px;
+}
+
+.go {
+  background: var(--acc);
+  color: #10180a;
+  font-weight: 800;
+  border-radius: 9px;
+  padding: 10px 16px;
+}
+
+.go:hover {
+  filter: brightness(1.08);
+}
+
+.sw {
+  position: relative;
+  width: 38px;
+  height: 21px;
+  flex: none;
+}
+
+.sw input {
+  position: absolute;
+  opacity: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  margin: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.sw span {
+  position: absolute;
+  inset: 0;
+  background: #34445b;
+  border-radius: 12px;
+  transition: .2s;
+  pointer-events: none;
+}
+
+.sw span::after {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 3px;
+  width: 15px;
+  height: 15px;
+  border-radius: 50%;
+  background: white;
+  transition: .2s;
+}
+
+.sw input:checked + span {
+  background: var(--ok);
+}
+
+.sw input:checked + span::after {
+  transform: translateX(17px);
+}
+
+.bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(12, 20, 34, .94);
+  backdrop-filter: blur(18px);
+  border-top: 1px solid #26364d;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom, 0px));
+  display: flex;
+  gap: 10px;
+  justify-content: center;
+}
+
+.bar button {
+  border: 1px solid #344761;
+  border-radius: 10px;
+  padding: 12px 22px;
+  font-weight: 750;
+  font-size: 12px;
+}
+
+.bar #save {
+  background: var(--acc);
+  border-color: var(--acc);
+  color: #10180a;
+}
+
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(86px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  background: var(--ok);
+  color: #06210f;
+  font-weight: 750;
+  padding: 10px 16px;
+  border-radius: 10px;
+  opacity: 0;
+  pointer-events: none;
+  transition: .2s;
+  z-index: 9;
+  max-width: 90vw;
+  text-align: center;
+}
+
+#toast.on {
+  opacity: 1;
+}
+
+@media (min-width: 700px) {
+  main {
+    padding-top: 24px;
+  }
+
+  .m {
+    padding: 15px;
+  }
+
+  .mw:hover {
+    border-color: #425875;
   }
 }
-const badC=c=>Number.isNaN(c.value)||(SCOPE.test(c.metric)&&((c.period==="last"&&!(c.last>0))||(c.period==="range"&&!(c.from>=0&&c.to>=c.from))));
-const perT=c=>{
-  if(!SCOPE.test(c.metric)||!c.period||c.period==="all")return "";
-  if(c.period==="last")return ` (son ${c.last||10} dk)`;
-  if(c.period==="range")return ` (${c.from??0}–${c.to??90}. dk)`;
-  return ` (${PER.find(p=>p[0]===c.period)[1]})`;
-};
 
-// ---- Maç listesi, detay ----
-function detailHtml(m){
-  const d=det[m.id];
-  if(!d)return '<div class="dt mute">Yükleniyor...</div>';
-  if(d.error)return `<div class="dt mute">${esc(d.error)}</div>`;
-  if(d.passive)return '<div class="dt mute">Pasif: API\'ye sorgu atılmıyor.</div>';
-  const f=v=>v==null||v===""?"–":esc(v);
-  const row=(t,x)=>x?`<tr><td>${t}</td><td>${f(x.home)}</td><td>${f(x.draw)}</td><td>${f(x.away)}</td><td>${f(x.over25)}</td><td>${f(x.under25)}</td></tr>`:`<tr><td>${t}</td><td colspan="5" class="mute">veri yok</td></tr>`;
-  const T=(d.totals||{})[dper]||{},o=d.odds||{},rows=(d.stats||{})[dper]||[];
-  return `<div class="dt">
-    <table><tr><th></th><th>1</th><th>X</th><th>2</th><th>2.5 Üst</th><th>2.5 Alt</th></tr>${row("Maç önü",o.pre)}${row("Canlı",o.live)}</table>
-    <div class="pt">${TABS.map(p=>`<button data-per="${p[0]}" class="${p[0]===dper?"on":""}">${p[1]}</button>`).join("")}</div>
-    <p class="tot">Toplam şut <b class="mono">${f(T.shots)}</b> · isabetli <b class="mono">${f(T.sot)}</b> · xG <b class="mono">${T.xg==null?"–":T.xg.toFixed(2)}</b> · kırmızı <b class="mono">${f(T.red)}</b></p>
-    ${rows.length?`<table class="sx">${rows.map(s=>`<tr><td>${f(s.home)}</td><td>${esc(SN[s.type]||s.type)}</td><td>${f(s.away)}</td></tr>`).join("")}</table>`:`<p class="mute">${dper==="l10"?"Son 10 dk yalnızca özet gösterir. Sunucu bu maçı en az 10 dk izlediyse dolar.":"Bu dönem için istatistik yok."}</p>`}
-    ${d.warn?`<p class="mute">${esc(d.warn)}</p>`:""}</div>`;
-}
-
-function rowHtml(m,xl){
-  const n=rules.filter(r=>r.matchId&&same(r.matchId,m.id)&&!r.draft).length,lv=isLive(m);
-  return `<div class="mw"><div class="m" data-om="${esc(m.id)}">
-    <div class="min ${lv?"live":""}">${lv?esc(m.minute)+"'":esc(m.status||"–")}</div>
-    <div><div class="tm"><span>${esc(m.home)}</span><b class="mono">${esc(m.homeGoals==null?"-":m.homeGoals)}</b></div>
-    <div class="tm"><span>${esc(m.away)}</span><b class="mono">${esc(m.awayGoals==null?"-":m.awayGoals)}</b></div>${xl||""}</div>
-    <button class="add" data-newm="${esc(m.id)}" aria-label="Bu maça kural ekle">${n?`<i>${n}</i>`:""}＋</button>
-  </div>${same(openM,m.id)?detailHtml(m):""}</div>`;
-}
-
-function renderMatches(){
-  $("q").hidden=flt.on;
-  if(flt.on){
-    const R=fres;
-    if(!R){$("list").innerHTML='<p class="empty">Filtre uygulanıyor...</p>';return}
-    if(R.error){$("list").innerHTML=`<p class="empty">${esc(R.error)}</p>`;return}
-    if(R.passive){$("list").innerHTML='<p class="empty">Pasif: filtre çalışmıyor.</p>';return}
-    const v=x=>x==null?"–":(Math.round(x*100)/100);
-    const head=`<p class="mute">Canlı ${R.total} maç · ${R.rows.length} eşleşti${R.pending?` · ${R.pending} maç için veri bekleniyor`:""}</p>`;
-    $("list").innerHTML=head+(R.rows.length?R.rows.map(m=>rowHtml(m,`<div class="xl">xG ${v(m.xg?.home)}–${v(m.xg?.away)} · şut ${v(m.shots?.home)}–${v(m.shots?.away)}${flt.sort.metric?` · <b>${v(m.value)}</b>`:""}</div>`)).join(""):`<p class="empty">Bu filtreye uyan canlı maç yok.</p>`);
-    return;
+@media (max-width: 420px) {
+  .c {
+    grid-template-columns: 1fr 1fr 30px;
   }
-  const q=$("q").value.trim().toLowerCase();
-  const L=matches.filter(m=>!q||(m.home+" "+m.away).toLowerCase().includes(q)).sort((a,b)=>isLive(b)-isLive(a));
-  $("list").innerHTML=L.length?L.map(m=>rowHtml(m)).join(""):`<p class="empty">${matches.length?"Eşleşen maç yok.":"Maç verisi yok. Skor API'si bağlı mı?"}</p>`;
-}
 
-// ---- Canlı filtre ----
-function renderFilter(){
-  $("fbtn").textContent=(flt.on?"● ":"")+"Canlı filtre"+(flt.on?" (açık)":"");
-  $("fpanel").hidden=!fopen;
-  if(!fopen)return;
-  const s=flt.sort;
-  $("fpanel").innerHTML=`
-    <div class="f" style="margin-top:0">Sırala (en yüksek üstte)</div>
-    <div class="c one"><select data-fs="1" data-f="metric">${SORTM.map(o=>`<option value="${o[0]}" ${s.metric===o[0]?"selected":""}>${o[1]}</option>`).join("")}</select>${s.metric?perHtml(s,'data-fs="1"'):""}</div>
-    <div class="f">Filtreler (hepsi birlikte uygulanır)</div>
-    ${flt.conditions.map((c,j)=>condRow(c,`data-fc="${j}"`,`data-fdel="${j}"`,FG)).join("")||'<p class="mute">Koşul yok: tüm canlı maçlar listelenir.</p>'}
-    <div class="row"><button class="ghost" id="faddc">＋ Koşul</button><button class="x" id="fclear">Temizle</button></div>
-    <div class="row"><span class="mute">Filtre açıkken sunucu canlı maçların istatistiğini yaklaşık 1 dk'da bir çeker.</span><button class="go" id="fapply">Uygula</button></div>`;
-}
-async function loadFilter(){
-  if(!flt.on||!active)return;
-  const conds=flt.conditions.filter(c=>!Number.isNaN(c.value));
-  try{
-    const r=await fetch("/api/filter",{method:"POST",headers:H(),body:JSON.stringify({conditions:conds,sort:flt.sort.metric?flt.sort:null})});
-    fres=r.ok?await r.json():{error:"Filtre çalışmadı"};
-  }catch{fres={error:"Bağlantı hatası"}}
-  if(tab==="m")renderMatches();
-}
-
-// ---- Kurallar ----
-const target=r=>r.matchId?esc(r.matchLabel||("Maç "+r.matchId)):"Tüm maçlar";
-const winT=r=>(r.minFrom!=null||r.minTo!=null)?` · ${r.minFrom??""}–${r.minTo??""}'`:"";
-const sumText=r=>r.conditions.length?r.conditions.map(c=>`${LBL[c.metric]||c.metric}${perT(c)} ${opT(c.op)} ${c.value}`).join(" ve "):"koşul yok";
-
-function body(r,i){
-  const missing=r.matchId&&!matches.some(m=>same(m.id,r.matchId));
-  const opts=`<option value="">Tüm maçlar</option>`
-    +(missing?`<option value="${esc(r.matchId)}" selected>${esc(r.matchLabel||r.matchId)} (listede yok)</option>`:"")
-    +matches.map(m=>`<option value="${esc(m.id)}" ${r.matchId&&same(m.id,r.matchId)?"selected":""}>${esc(m.home)} – ${esc(m.away)}${isLive(m)?` (${esc(m.minute)}')`:""}</option>`).join("");
-  return `<div class="rb">
-    <label class="f">Kural adı<input type="text" value="${esc(r.name)}" data-r="${i}" data-f="name"></label>
-    <label class="f">Çalışacağı maç<select data-r="${i}" data-f="target">${opts}</select></label>
-    <div class="f">Kuralın çalışacağı dakika aralığı (boşsa tüm maç)</div>
-    <div class="mm"><input type="number" inputmode="numeric" placeholder="başlangıç" value="${esc(r.minFrom)}" data-r="${i}" data-f="minFrom"><span>–</span><input type="number" inputmode="numeric" placeholder="bitiş" value="${esc(r.minTo)}" data-r="${i}" data-f="minTo"></div>
-    <div class="f">Koşullar (hepsi doğru olunca bildirim gider). Gol, şut, xG ve kart koşullarına zaman eklenebilir.</div>
-    ${r.conditions.map((c,j)=>condRow(c,`data-r="${i}" data-j="${j}"`,`data-del="${i}.${j}"`,GROUPS)).join("")}
-    <div class="row"><button class="ghost" data-addc="${i}">＋ Koşul</button><button class="x" data-delr="${i}">${r.draft?"Vazgeç":"Kuralı sil"}</button></div>
-    <div class="row"><span class="mute">${r.draft?"Kaydedilene kadar çalışmaz.":""}</span><button class="go" data-save="${esc(r.id)}">${r.draft?"Kaydet ve başlat":"Kaydet"}</button></div>
-  </div>`;
-}
-
-function renderRules(){
-  const L=rules.map((r,i)=>{
-    const o=open===r.id;
-    return `<div class="r ${r.enabled?"":"off"} ${r.draft?"dr":""}">
-      <div class="rh">
-        ${r.draft?'<span class="bd">TASLAK</span>':`<label class="sw"><input type="checkbox" data-en="${i}" ${r.enabled?"checked":""} aria-label="Kural açık"><span></span></label>`}
-        <div class="t" data-open="${esc(r.id)}"><div class="n">${esc(r.name)||"İsimsiz"}</div><div class="s">${r.matchId?"⚽ ":""}${target(r)}${winT(r)} · ${esc(sumText(r))}</div></div>
-        <button class="chev" data-open="${esc(r.id)}" aria-label="Aç/kapat">${o?"▾":"▸"}</button>
-      </div>${o?body(r,i):""}</div>`}).join("");
-  $("pr").innerHTML=`<button class="ghost" data-newall>＋ Tüm maçlar için kural</button>`+(L||`<p class="empty">Kural yok. Maçlar sekmesinden bir maç seç ya da yukarıdan ekle.</p>`);
-}
-
-function render(){
-  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===tab));
-  $("pm").hidden=tab!=="m";$("pr").hidden=tab!=="r";
-  if(tab==="m"){renderFilter();renderMatches()}else renderRules();
-  status();
-}
-
-function addRule(m){
-  const lbl=m?`${m.home} – ${m.away}`:"";
-  const r={id:uid(),name:m?lbl:"Yeni kural",enabled:true,draft:true,matchId:m?String(m.id):null,matchLabel:lbl,minFrom:null,minTo:null,conditions:[newCond()]};
-  rules.unshift(r);open=r.id;tab="r";render();window.scrollTo(0,0);
-}
-
-async function saveAll(activate){
-  const list=rules.filter(r=>!r.draft||r.id===activate);
-  const bad=list.find(r=>!r.conditions.length||r.conditions.some(badC));
-  if(bad)return alert(`"${bad.name}" kuralında eksik ya da hatalı bir değer var (değer, dakika veya aralık).`);
-  const payload=list.map(({draft,...r})=>r);
-  const r=await fetch("/api/rules",{method:"POST",headers:H(),body:JSON.stringify({rules:payload})});
-  if(!r.ok)return alert("Kaydedilemedi, şifreyi kontrol et.");
-  const a=rules.find(x=>x.id===activate);
-  if(a){a.draft=false;a.enabled=true;open=null}
-  dirty(false);render();toast(a?"Kural kaydedildi, çalışıyor ✅":"Kaydedildi ✅");
-}
-
-function targetOf(d){
-  if(d.fc!==undefined)return {c:flt.conditions[d.fc],kind:"f"};
-  if(d.fs!==undefined)return {c:flt.sort,kind:"f"};
-  if(d.r!==undefined&&d.j!==undefined)return {c:rules[d.r].conditions[d.j],kind:"r"};
-  return null;
-}
-document.addEventListener("input",e=>{
-  const t=e.target,d=t.dataset;
-  if(d.en!==undefined){rules[d.en].enabled=t.checked;dirty(true);render();return}
-  const T=targetOf(d);
-  if(T){
-    setField(T.c,d.f,t.value);
-    if(T.kind==="r")dirty(true);else saveFlt();
-    if(d.f==="metric"||d.f==="period")T.kind==="r"?render():renderFilter();
-    return;
+  .c.one {
+    grid-template-columns: 1fr;
   }
-  if(d.r===undefined)return;
-  const r=rules[d.r];dirty(true);
-  if(d.f==="minFrom"||d.f==="minTo"){const v=parseFloat(t.value);r[d.f]=Number.isNaN(v)?null:v;return}
-  if(d.f==="target"){
-    const m=matches.find(x=>same(x.id,t.value));
-    const keep=t.value&&r.matchId&&same(r.matchId,t.value);
-    r.matchLabel=m?`${m.home} – ${m.away}`:(keep?r.matchLabel:"");
-    r.matchId=t.value||null;render();return;
+
+  .c select:first-child {
+    grid-column: 1 / -1;
   }
-  r[d.f]=t.value;
-});
-document.addEventListener("click",e=>{
-  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om],[data-per],[data-fdel],#fbtn,#faddc,#fclear,#fapply");
-  if(!b)return;const d=b.dataset;
-  if(b.id==="fbtn"){fopen=!fopen;renderFilter();return}
-  if(b.id==="faddc"){flt.conditions.push(newF());saveFlt();renderFilter();return}
-  if(b.id==="fclear"){flt={on:false,conditions:[],sort:defSort()};fres=null;saveFlt();render();return}
-  if(b.id==="fapply"){
-    const bad=flt.conditions.find(badC)||(flt.sort.metric&&badC({...flt.sort,value:0}));
-    if(bad)return alert("Filtrede eksik ya da hatalı bir değer var (değer, dakika veya aralık).");
-    flt.on=true;saveFlt();fres=null;fopen=false;render();loadFilter();return;
+
+  #stt {
+    max-width: 80px;
   }
-  if(d.fdel!==undefined){flt.conditions.splice(d.fdel,1);saveFlt();renderFilter();return}
-  if(d.tab){tab=d.tab;render();return}
-  if(d.per){dper=d.per;renderMatches();return}
-  if(d.open){open=open===d.open?null:d.open;render();return}
-  if(d.newm!==undefined){addRule(matches.find(x=>same(x.id,d.newm))||null);return}
-  if(d.om!==undefined){openM=same(openM,d.om)?null:d.om;renderMatches();if(openM)loadDetail(openM);return}
-  if(d.newall!==undefined){addRule(null);return}
-  if(d.save){saveAll(d.save);return}
-  if(d.addc!==undefined){rules[d.addc].conditions.push(newCond());dirty(true);render();return}
-  if(d.del){const[i,j]=d.del.split(".");rules[i].conditions.splice(j,1);dirty(true);render();return}
-  if(d.delr!==undefined){const r=rules[d.delr];if(r.draft||confirm("Bu kural silinsin mi?")){rules.splice(d.delr,1);open=null;if(!r.draft)dirty(true);render()}}
-});
-$("q").oninput=renderMatches;
 
-$("act").onclick=async()=>{
-  const want=!active;
-  if(!want&&!confirm("Pasif yapılırsa API'ye sorgu atılmaz ve bildirim gitmez. Devam edilsin mi?"))return;
-  const r=await fetch("/api/state",{method:"POST",headers:H(),body:JSON.stringify({active:want})});
-  if(!r.ok)return alert("Durum değiştirilemedi, şifreyi kontrol et.");
-  active=(await r.json()).active;status();
-  toast(active?"Aktif: takip başladı ✅":"Pasif: API'ye sorgu atılmıyor");
-  if(active)setTimeout(loadMatches,4000);
-};
-$("save").onclick=()=>saveAll(null);
-$("test").onclick=async()=>{
-  const r=await fetch("/api/test",{method:"POST",headers:H()});
-  alert(r.ok?"Test mesajı gönderildi.":"Gönderilemedi.");
-};
-
-async function loadDetail(id){
-  try{const r=await fetch("/api/match/"+encodeURIComponent(id),{headers:H()});det[id]=r.ok?await r.json():{error:"Veri alınamadı"}}
-  catch{det[id]={error:"Bağlantı hatası"}}
-  if(tab==="m"&&same(openM,id))renderMatches();
+  .bar button {
+    flex: 1;
+  }
 }
-async function loadMatches(){
-  try{
-    const r=await fetch("/api/matches",{headers:H()});
-    const d=await r.json();
-    matches=d.matches||[];updated=d.updated;err=d.error||"";active=d.active!==false;
-  }catch{err="Bağlantı hatası"}
-  status();
-  if(tab==="m")renderMatches();
-  if(openM&&active)loadDetail(openM);
-  if(flt.on&&active)loadFilter();
-}
-
-(async()=>{
-  const r=await fetch("/api/rules",{headers:H()});
-  if(r.status===401){localStorage.removeItem("pw");alert("Şifre yanlış, sayfayı yenile.");return}
-  localStorage.setItem("pw",pw);
-  rules=(await r.json()).rules||[];
-  rules.forEach(x=>{x.conditions=x.conditions||[];if(x.matchId===undefined)x.matchId=null});
-  await loadMatches();render();
-  setInterval(loadMatches,15000);
-})();
-</script>
-</body>
-</html>

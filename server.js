@@ -6,12 +6,10 @@ import { findTriggered, formatAlert, condsMatch, toMetrics, pkey } from "./rules
 const env = process.env;
 const { BOT_TOKEN, CHAT_ID, PANEL_PASSWORD, API_KEY, DATA_DIR = ".", TIMEZONE = "Europe/Istanbul", BOOKMAKER_ID = "8" } = env;
 const sec = (v, def, min) => Math.max(min, Number(v) || def);
-const POLL = sec(env.POLL_SECONDS, 15, 15);
-const STATS = sec(env.STATS_SECONDS, 15, 15);
-const ODDS = sec(env.ODDS_SECONDS, 15, 15);
-const LIST = sec(env.LIST_SECONDS, 600, 120);
-const FILTER_SECONDS = sec(env.FILTER_SECONDS, 60, 30); // canlı filtre için maç başına istatistik aralığı
-const FILTER_BUDGET = sec(env.FILTER_BUDGET, 8, 1);     // filtre için bir turda en fazla istatistik isteği
+const POLL = 60;                 // canlı maç listesi ve kontrol döngüsü: 60 saniye
+const STATS = 60;                // istatistik güncelleme kontrolü: 60 saniye
+const STATS_BUDGET = 2;          // her turda en fazla 2 maçın istatistiği
+const FINAL_CHECK = 10 * 60;      // bildirimli maçların bitiş skorunu 10 dakikada bir kontrol et
 const REQUIRE_XG = env.REQUIRE_XG !== "0";
 const LEAGUES = (env.LEAGUE_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -24,6 +22,7 @@ if (!BOT_TOKEN || !CHAT_ID || !PANEL_PASSWORD) {
 const RULES_FILE = path.join(DATA_DIR, "rules.json");
 const FIRED_FILE = path.join(DATA_DIR, "fired.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
+const NOTIFICATIONS_FILE = path.join(DATA_DIR, "notifications.json");
 const loadRules = () => { try { return JSON.parse(fs.readFileSync(RULES_FILE, "utf8")).rules || []; } catch { return []; } };
 const saveRules = (rules) => fs.writeFileSync(RULES_FILE, JSON.stringify({ rules }, null, 2));
 
@@ -31,6 +30,14 @@ let fired = {};
 try { fired = JSON.parse(fs.readFileSync(FIRED_FILE, "utf8")); } catch {}
 for (const k of Object.keys(fired)) if (fired[k] < Date.now() - 3 * 86400000) delete fired[k];
 const saveFired = () => { try { fs.writeFileSync(FIRED_FILE, JSON.stringify(fired)); } catch (e) { console.error("fired yazılamadı:", e.message); } };
+let notifications = [];
+try { notifications = JSON.parse(fs.readFileSync(NOTIFICATIONS_FILE, "utf8")); if (!Array.isArray(notifications)) notifications = []; } catch {}
+const saveNotifications = () => {
+  try { fs.writeFileSync(NOTIFICATIONS_FILE, JSON.stringify(notifications, null, 2)); }
+  catch (e) { console.error("Bildirim geçmişi yazılamadı:", e.message); }
+};
+const localDate = (d = new Date()) => new Intl.DateTimeFormat("sv-SE", { timeZone: TIMEZONE }).format(d);
+const FINISHED = new Set(["FT", "AET", "PEN", "AWD", "WO"]);
 
 let active = true; // pasifken API'ye hiç sorgu atılmaz
 try { active = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")).active !== false; } catch {}
@@ -259,19 +266,69 @@ function condInfo(conds) {
 }
 const scopeConds = (rules, m) => rules.filter((r) => !r.matchId || String(r.matchId) === String(m.id)).flatMap((r) => r.conditions || []);
 
-// Bir kural bu maçı kapsıyorsa bildirim için tüm veriler (istatistik, oranlar) gerekir
-const needs = (rules, m) => {
-  const any = rules.some((r) => !r.matchId || String(r.matchId) === String(m.id));
-  return { stats: any, live: any, pre: any };
-};
+// Bir maç için hangi veri gerektiğini kuralların metriklerinden çıkar.
+function needs(rules, m) {
+  const conditions = rules
+    .filter((r) => !r.matchId || String(r.matchId) === String(m.id))
+    .flatMap((r) => r.conditions || []);
+  return {
+    stats: conditions.some((c) => STATM.test(c.metric)),
+    pre: conditions.some((c) => String(c.metric).startsWith("pre_")),
+  };
+}
 
 // ---------- Takip döngüsü ----------
-let schedule = [], scheduleAt = 0, liveMap = new Map();
-let liveOdds = new Map(), liveOddsAt = 0;
-const extra = new Map(); // id -> { stats, statsAt, hist, goals, evTotal, evAt, pre, preAt, detail, detailAt }
+let schedule = [], scheduleDate = "", liveMap = new Map();
+let finalCheckAt = 0, finalCursor = 0;
+const extra = new Map();
 let cache = { matches: [], updated: null, error: "" };
 let lastLog = "", polling = false;
-let filterWanted = 0, filterSpec = { conditions: [], sort: null }; // canlı filtre: panel açıkken istatistik çekilir
+
+function addNotification(m, rule, minute, sentAt) {
+  notifications.push({
+    id: `${m.id}-${sentAt}-${Math.random().toString(36).slice(2, 8)}`,
+    fixtureId: String(m.id), home: m.home, away: m.away,
+    country: m.country || "", league: m.league || "", ruleName: rule.name || "Kural",
+    minute: Number(minute) || 0,
+    sentAt, date: localDate(new Date(sentAt)),
+    scoreAt: { home: m.homeGoals ?? null, away: m.awayGoals ?? null },
+    finalScore: null, finalStatus: null, finishedAt: null,
+  });
+  // Dosyanın sınırsız büyümesini önle; yaklaşık son 1 yıllık geçmişi tut.
+  const cutoff = Date.now() - 366 * 86400000;
+  notifications = notifications.filter((n) => n.sentAt >= cutoff).slice(-30000);
+  saveNotifications();
+}
+
+async function updateFinalScores() {
+  const pending = [...new Set(notifications.filter((n) => !n.finalScore).map((n) => String(n.fixtureId)))];
+  if (!pending.length) return;
+  const start = finalCursor % pending.length;
+  const ids = pending.length <= 20 ? pending : pending.slice(start, start + 20);
+  finalCursor = pending.length <= 20 ? 0 : (start + ids.length) % pending.length;
+  const fixtures = await api(`/fixtures?ids=${ids.join("-")}&timezone=${encodeURIComponent(TIMEZONE)}`);
+  let changed = false;
+  for (const f of fixtures) {
+      const status = f.fixture?.status?.short;
+      if (!FINISHED.has(status)) continue;
+      const finalScore = { home: f.goals?.home ?? null, away: f.goals?.away ?? null };
+      const id = String(f.fixture.id);
+      for (const n of notifications) {
+        if (String(n.fixtureId) !== id || n.finalScore) continue;
+        n.finalScore = finalScore;
+        n.finalStatus = status;
+        n.finishedAt = Date.now();
+        changed = true;
+      }
+      // Günlük fikstür kaydını da final skorla güncelle.
+      const sm = schedule.find((m) => String(m.id) === id);
+      if (sm) {
+        sm.homeGoals = finalScore.home; sm.awayGoals = finalScore.away;
+        sm.short = status; sm.status = TR[status] || status; sm.inPlay = false;
+      }
+  }
+  if (changed) saveNotifications();
+}
 
 async function poll() {
   if (polling || !active) return;
@@ -281,101 +338,105 @@ async function poll() {
   try {
     if (!API_KEY) { cache.error = "API_KEY tanımlı değil"; return; }
     const now = Date.now();
-    const slow = quota !== null && quota < 500 ? 4 : 1;
     const rules = loadRules().filter((r) => r.enabled && !r.draft);
 
-    if (now - scheduleAt > LIST * 1000) {
-      scheduleAt = now;
+    // Günlük fikstür yalnızca yerel gün değişince yenilenir.
+    const day = today();
+    if (scheduleDate !== day) {
       try {
-        schedule = (await api(`/fixtures?date=${today()}&timezone=${encodeURIComponent(TIMEZONE)}`)).filter(wanted).map(norm);
-      } catch (e) { scheduleAt = now - (LIST - 60) * 1000; warns.push(e.message); }
+        const fresh = (await api(`/fixtures?date=${day}&timezone=${encodeURIComponent(TIMEZONE)}`)).filter(wanted).map(norm);
+        schedule = fresh;
+        scheduleDate = day;
+      } catch (e) { warns.push(`Fikstür: ${e.message}`); }
     }
 
-    const soon = schedule.some((m) => m.inPlay || (m.short === "NS" && Math.abs(m.kickoff * 1000 - now) < 600000));
-    if (soon || liveMap.size) {
-      await safe(async () => {
-        const list = (await api(`/fixtures?live=${LEAGUES.length ? LEAGUES.join("-") : "all"}`)).filter(wanted).map(norm);
-        liveMap = new Map(list.map((m) => [m.id, m]));
-        if (schedule.some((s) => s.inPlay && !liveMap.has(s.id))) scheduleAt = Math.min(scheduleAt, now - (LIST - 60) * 1000);
-      });
-    }
+    // Canlı maç listesi dakikada bir güncellenir.
+    await safe(async () => {
+      const list = (await api(`/fixtures?live=${LEAGUES.length ? LEAGUES.join("-") : "all"}`)).filter(wanted).map(norm);
+      liveMap = new Map(list.map((m) => [m.id, m]));
+    });
 
     const byId = new Map(schedule.map((m) => [m.id, m]));
     for (const m of liveMap.values()) byId.set(m.id, { ...byId.get(m.id), ...m });
     const all = [...byId.values()];
-    cache = { matches: all, updated: now, error: "" };
     const playing = all.filter((m) => m.inPlay);
 
-    if (playing.some((m) => needs(rules, m).live) && now - liveOddsAt > ODDS * 1000 * slow) {
-      liveOddsAt = now;
-      await safe(async () => {
-        const resp = await api("/odds/live");
-        liveOdds = new Map(resp.map((o) => [o.fixture.id, oddsSet(o.odds, true)]));
-      });
-    }
+    // Filtreler yalnızca bu önbelleği okur; filtre isteği hiçbir API sorgusu başlatmaz.
+    const statCandidates = playing.filter((m) => RUNNING.has(m.short))
+      .map((m) => ({ m, x: extra.get(m.id) || {} }))
+      .sort((a, b) => (a.x.statsAt || 0) - (b.x.statsAt || 0));
+    const statTasks = statCandidates.slice(0, STATS_BUDGET).map(({ m, x }) => {
+      extra.set(m.id, x);
+      x.statsAt = now;
+      return safe(async () => { x.stats = parseStats(await fetchStats(m.id), m); record(x, m); x.detail = null; });
+    });
 
-    const filterOn = now - filterWanted < 120000;
-    const fConds = filterOn ? [...filterSpec.conditions, ...(filterSpec.sort ? [filterSpec.sort] : [])] : [];
-    const fStats = fConds.some((c) => STATM.test(c.metric));
-    let fBudget = FILTER_BUDGET, preBudget = 5;
-    const tasks = [];
+    // Gol dakikası gereken kurallar için olay verisi; yalnızca skor değiştiğinde.
+    const otherTasks = [];
+    let preBudget = 1, eventBudget = 1;
     for (const m of all) {
-      const upcoming = m.short === "NS" && m.kickoff * 1000 - now < 3 * 3600000;
-      if (!m.inPlay && !upcoming) continue;
-      const n = needs(rules, m);
-      const fw = filterOn && m.inPlay;
-      if (!n.stats && !n.pre && !fw) continue;
+      if (!m.inPlay) continue;
       const x = extra.get(m.id) || {};
       extra.set(m.id, x);
-
-      let wantStats = n.stats && RUNNING.has(m.short) && now - (x.statsAt || 0) > STATS * 1000 * slow;
-      if (!wantStats && fw && fStats && RUNNING.has(m.short) && fBudget > 0 && now - (x.statsAt || 0) > FILTER_SECONDS * 1000 * slow) { wantStats = true; fBudget--; }
-      if (wantStats) {
-        x.statsAt = now;
-        tasks.push(safe(async () => { x.stats = parseStats(await fetchStats(m.id), m); record(x, m); }));
-      }
-
-      // Zaman penceresi içinde gol koşulu varsa gol olaylarını çek (skor değişince yenilenir)
-      const info = condInfo([...scopeConds(rules, m), ...(fw ? fConds : [])]);
-      const gt = (m.homeGoals ?? 0) + (m.awayGoals ?? 0);
-      if (info.goals && m.inPlay && x.evTotal !== gt && now - (x.evAt || 0) > 20000) {
+      const conditions = rules
+        .filter((r) => !r.matchId || String(r.matchId) === String(m.id))
+        .flatMap((r) => r.conditions || []);
+      const info = condInfo(conditions);
+      const goalTotal = (m.homeGoals ?? 0) + (m.awayGoals ?? 0);
+      if (eventBudget > 0 && info.goals && x.evTotal !== goalTotal && now - (x.evAt || 0) > 20000) {
+        eventBudget--;
         x.evAt = now;
-        tasks.push(safe(async () => { x.goals = await fetchGoals(m); x.evTotal = x.goals.length; }));
+        otherTasks.push(safe(async () => { x.goals = await fetchGoals(m); x.evTotal = goalTotal; }));
       }
-
-      if (n.pre && preBudget > 0 && (x.preAt === undefined || (!x.pre && now - x.preAt > 1800000))) {
-        preBudget--;
-        x.preAt = now;
-        tasks.push(safe(async () => {
+      if (preBudget > 0 && needs(rules, m).pre && x.preAt === undefined) {
+        preBudget--; x.preAt = now;
+        otherTasks.push(safe(async () => {
           const r = await api(`/odds?fixture=${m.id}&bookmaker=${BOOKMAKER_ID}`);
           x.pre = oddsSet(r[0]?.bookmakers?.[0]?.bets, false);
         }));
       }
     }
-    await Promise.all(tasks);
-    for (const id of extra.keys()) if (!byId.has(id)) extra.delete(id);
 
+    await Promise.all([...statTasks, ...otherTasks]);
+
+    // Bildirim kuralları. Canlı oranlar kapalıdır; live_* koşulları artık veri bulamaz.
     for (const m of playing) {
       const x = extra.get(m.id) || {};
       const S = x.stats;
+      const relevant = rules.filter((r) => !r.matchId || String(r.matchId) === String(m.id));
+      const winKeys = condInfo(relevant.flatMap((r) => r.conditions || [])).keys;
       const full = {
-        ...m, preOdds: x.pre, liveOdds: liveOdds.get(m.id),
+        ...m, preOdds: x.pre || null, liveOdds: null,
         shots: S?.all.shots, shotsOnTarget: S?.all.sot, xg: S?.all.xg, red: S?.all.red,
-        win: buildWin(condInfo(scopeConds(rules, m)).keys, m, x),
+        win: buildWin(winKeys, m, x),
       };
-      if (REQUIRE_XG && (full.xg?.home == null || full.xg?.away == null)) continue; // gol beklentisi yoksa bildirim yok
-      for (const { rule, key } of findTriggered(rules, full, fired)) {
+      const readyRules = relevant.filter((r) => {
+        const usesStats = (r.conditions || []).some((c) => STATM.test(c.metric));
+        const usesXg = (r.conditions || []).some((c) => /xg/i.test(c.metric));
+        if (usesStats && !S) return false;
+        if (REQUIRE_XG && usesXg && (full.xg?.home == null || full.xg?.away == null)) return false;
+        return true;
+      });
+      for (const { rule, key } of findTriggered(readyRules, full, fired)) {
         await safe(async () => {
+          const sentAt = Date.now();
           await sendTelegram(formatAlert(full, rule));
-          fired[key] = Date.now();
+          fired[key] = sentAt;
           saveFired();
-          console.log("Gönderildi:", rule.name, m.home, "-", m.away);
+          addNotification(full, rule, m.minute, sentAt);
+          console.log("Gönderildi:", rule.name, m.home, "-", m.away, `${m.homeGoals}-${m.awayGoals}`);
         });
       }
     }
 
-    cache.error = warns[0] || "";
-    const log = `[poll] program=${schedule.length} canlı=${liveMap.size} kalan_istek=${quota ?? "?"}`;
+    // Bildirim giden maçların nihai skorlarını toplu sorguyla al.
+    if (now - finalCheckAt >= FINAL_CHECK * 1000) {
+      finalCheckAt = now;
+      await safe(updateFinalScores);
+    }
+
+    cache = { matches: all, updated: now, error: warns[0] || "" };
+    const log = `[poll] fikstür=${schedule.length} canlı=${liveMap.size} istatistik_turu=${Math.min(statCandidates.length, STATS_BUDGET)} bildirim=${notifications.length} kalan_istek=${quota ?? "?"}`;
     if (log !== lastLog) { console.log(log); lastLog = log; }
   } catch (e) {
     cache.error = e.message;
@@ -388,36 +449,20 @@ async function poll() {
 poll();
 setInterval(poll, POLL * 1000);
 
-// Maç detayı: tüm istatistikler (tümü / 1. yarı / 2. yarı / son 10 dk özeti) ve oranlar
-async function detail(m) {
-  const now = Date.now();
+// Maç detayı sadece önbellekten üretilir; API çağrısı yapmaz.
+function detail(m) {
   const x = extra.get(m.id) || {};
-  extra.set(m.id, x);
-  if (x.detail && now - x.detailAt < 14000) return x.detail;
-  const warns = [];
-  const safe = async (fn) => { try { await fn(); } catch (e) { warns.push(e.message); } };
-  if (!x.statsAt || now - x.statsAt > 14000) {
-    x.statsAt = now;
-    await safe(async () => { x.stats = parseStats(await fetchStats(m.id), m); record(x, m); });
-  }
-  let live = null;
-  if (m.inPlay) await safe(async () => { live = oddsSet((await api(`/odds/live?fixture=${m.id}`))[0]?.odds, true); });
-  if (x.preAt === undefined || (!x.pre && now - x.preAt > 300000)) {
-    x.preAt = now;
-    await safe(async () => { x.pre = oddsSet((await api(`/odds?fixture=${m.id}&bookmaker=${BOOKMAKER_ID}`))[0]?.bookmakers?.[0]?.bets, false); });
-  }
   const S = x.stats;
   const sum = (o) => (o?.home != null && o?.away != null ? o.home + o.away : null);
   const tot = (b) => ({ shots: sum(b.shots), sot: sum(b.sot), xg: sum(b.xg), red: sum(b.red) });
   const l10 = S ? rangeBlock(x.hist, m.minute, S.all, Math.max(0, m.minute - 10), 200) : emptyWin();
-  x.detail = {
+  return {
     stats: S ? { all: rowsOf(S, "all", m), h1: rowsOf(S, "h1", m), h2: rowsOf(S, "h2", m) } : { all: [], h1: [], h2: [] },
     totals: S ? { all: tot(S.all), h1: tot(S.h1), h2: tot(S.h2), l10: { shots: sum(l10.shots), sot: sum(l10.shotsOnTarget), xg: sum(l10.xg), red: sum(l10.red) } } : { all: {}, h1: {}, h2: {}, l10: {} },
-    odds: { pre: x.pre || null, live },
-    warn: warns[0] || "",
+    odds: { pre: x.pre || null, live: null },
+    updated: x.statsAt || null,
+    warn: !S ? "İstatistik henüz önbelleğe alınmadı; sıradaki güncellemede gelecek." : "",
   };
-  x.detailAt = Date.now();
-  return x.detail;
 }
 
 // ---------- Web paneli ----------
@@ -439,28 +484,47 @@ app.get("/api/state", auth, (req, res) => res.json({ active }));
 app.post("/api/state", auth, (req, res) => {
   active = !!req.body?.active;
   try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ active })); } catch (e) { console.error("settings yazılamadı:", e.message); }
-  if (active) { scheduleAt = 0; liveMap = new Map(); poll(); }
+  if (active) { scheduleDate = ""; liveMap = new Map(); poll(); }
   console.log("Durum:", active ? "AKTİF" : "PASİF");
   res.json({ active });
 });
 
 app.get("/api/matches", auth, (req, res) => {
   res.json({
-    matches: cache.matches.map(({ id, home, away, minute, status, homeGoals, awayGoals }) => ({ id, home, away, minute, status, homeGoals, awayGoals })),
+    matches: cache.matches.map(({ id, home, away, minute, status, homeGoals, awayGoals, country, league, short, kickoff }) => ({ id, home, away, minute, status, homeGoals, awayGoals, country, league, short, kickoff })),
     updated: cache.updated,
     error: cache.error,
     active,
   });
 });
 
-app.get("/api/match/:id", auth, async (req, res) => {
-  if (!active) return res.json({ passive: true });
+app.get("/api/match/:id", auth, (req, res) => {
   const m = cache.matches.find((x) => String(x.id) === req.params.id);
   if (!m) return res.status(404).json({ error: "maç bulunamadı" });
-  try { res.json(await detail(m)); } catch (e) { res.status(500).json({ error: e.message }); }
+  res.json(detail(m));
 });
 
-// Canlı filtre: tüm canlı maçlar üzerinde koşullar + sıralama
+app.get("/api/notifications", auth, (req, res) => {
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(String(req.query.date || "")) ? String(req.query.date) : today();
+  const filter = ["all", "finished", "pending"].includes(req.query.filter) ? req.query.filter : "all";
+  const dayItems = notifications.filter((n) => n.date === date).sort((a, b) => b.sentAt - a.sentAt);
+  const counts = {
+    notifications: dayItems.length,
+    matches: new Set(dayItems.map((n) => String(n.fixtureId))).size,
+    finished: new Set(dayItems.filter((n) => n.finalScore).map((n) => String(n.fixtureId))).size,
+    pending: new Set(dayItems.filter((n) => !n.finalScore).map((n) => String(n.fixtureId))).size,
+  };
+  const visible = filter === "finished" ? dayItems.filter((n) => n.finalScore)
+    : filter === "pending" ? dayItems.filter((n) => !n.finalScore) : dayItems;
+  res.json({ date, counts, items: visible, allItems: dayItems, updated: Date.now() });
+});
+
+app.get("/api/notifications/match/:id", auth, (req, res) => {
+  const items = notifications.filter((n) => String(n.fixtureId) === String(req.params.id)).sort((a, b) => a.sentAt - b.sentAt);
+  res.json({ items });
+});
+
+// Filtre yalnızca en son alınmış önbellek verisini değerlendirir; API çağrısı yoktur.
 const OPSET = new Set([">=", ">", "<=", "<", "=="]);
 const ALLOWED = /^((home|away|total)_(goals|shots|sot|xg|red)|goal_diff|minute)$/;
 const cleanCond = (c) => ({
@@ -469,12 +533,9 @@ const cleanCond = (c) => ({
   last: Number(c.last) || 10, from: Number(c.from) || 0, to: Number(c.to) || 200,
 });
 app.post("/api/filter", auth, (req, res) => {
-  if (!active) return res.json({ passive: true });
   const conditions = (req.body?.conditions || []).map(cleanCond).filter((c) => ALLOWED.test(c.metric) && Number.isFinite(c.value));
   const s = req.body?.sort;
   const sort = s && ALLOWED.test(s.metric || "") ? cleanCond({ ...s, value: 0 }) : null;
-  filterWanted = Date.now();
-  filterSpec = { conditions, sort };
   const all = [...conditions, ...(sort ? [sort] : [])];
   const needStats = all.some((c) => STATM.test(c.metric));
   const info = condInfo(all);
@@ -493,7 +554,7 @@ app.post("/api/filter", auth, (req, res) => {
   }
   if (sort) rows.sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
   else rows.sort((a, b) => b.minute - a.minute);
-  res.json({ rows: rows.slice(0, 40), total, pending, updated: Date.now() });
+  res.json({ rows: rows.slice(0, 100), total, pending, updated: cache.updated });
 });
 
 app.post("/api/test", auth, async (req, res) => {

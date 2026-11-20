@@ -21,6 +21,7 @@ if (!BOT_TOKEN || !CHAT_ID || !PANEL_PASSWORD) {
 // ---------- Kayıtlar ----------
 const RULES_FILE = path.join(DATA_DIR, "rules.json");
 const FIRED_FILE = path.join(DATA_DIR, "fired.json");
+const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const loadRules = () => { try { return JSON.parse(fs.readFileSync(RULES_FILE, "utf8")).rules || []; } catch { return []; } };
 const saveRules = (rules) => fs.writeFileSync(RULES_FILE, JSON.stringify({ rules }, null, 2));
 
@@ -28,6 +29,9 @@ let fired = {};
 try { fired = JSON.parse(fs.readFileSync(FIRED_FILE, "utf8")); } catch {}
 for (const k of Object.keys(fired)) if (fired[k] < Date.now() - 3 * 86400000) delete fired[k];
 const saveFired = () => { try { fs.writeFileSync(FIRED_FILE, JSON.stringify(fired)); } catch (e) { console.error("fired yazılamadı:", e.message); } };
+
+let active = true; // pasifken API'ye hiç sorgu atılmaz
+try { active = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")).active !== false; } catch {}
 
 // ---------- Telegram ----------
 async function sendTelegram(text) {
@@ -53,6 +57,21 @@ async function api(q) {
   return j.response || [];
 }
 
+// half=true ile yarı istatistikleri de gelir; desteklenmezse otomatik düz istek
+let halfOk = true, halfLogged = false;
+async function fetchStats(id) {
+  if (halfOk) {
+    try {
+      const r = await api(`/fixtures/statistics?fixture=${id}&half=true`);
+      if (!halfLogged && r[0]) { halfLogged = true; console.log("[half] alanlar:", Object.keys(r[0]).join(",")); }
+      return r;
+    } catch (e) {
+      if (/half/i.test(e.message)) halfOk = false; else throw e;
+    }
+  }
+  return api(`/fixtures/statistics?fixture=${id}`);
+}
+
 const today = () => new Intl.DateTimeFormat("sv-SE", { timeZone: TIMEZONE }).format(new Date());
 const IN_PLAY = new Set(["1H", "2H", "HT", "ET", "BT", "P", "LIVE", "SUSP", "INT"]);
 const RUNNING = new Set(["1H", "2H", "ET", "LIVE"]);
@@ -70,6 +89,7 @@ function norm(f) {
   return {
     id: f.fixture.id, home: f.teams.home.name, away: f.teams.away.name,
     homeId: f.teams.home.id, awayId: f.teams.away.id,
+    country: f.league.country, league: f.league.name,
     minute: f.fixture.status.elapsed ?? 0, status: label, short: s, inPlay: IN_PLAY.has(s),
     homeGoals: f.goals.home, awayGoals: f.goals.away, kickoff: f.fixture.timestamp,
   };
@@ -89,7 +109,6 @@ function pick1x2(bets, re) {
   return o.home || o.draw || o.away ? o : null;
 }
 
-// 2.5 alt/üst oranı (canlıda handicap alanı, maç önünde "Over 2.5" yazısı)
 function pickOU(bets, line = 2.5) {
   const bad = /half|1st|2nd|team|corner|card|asian|exact|both|btts/i;
   for (const b of bets || []) {
@@ -99,8 +118,7 @@ function pickOU(bets, line = 2.5) {
       if (v.suspended) continue;
       const val = String(v.value).toLowerCase();
       const hc = v.handicap != null && v.handicap !== "" ? Number(v.handicap) : null;
-      const hit = hc !== null ? hc === line : val.includes(String(line));
-      if (!hit) continue;
+      if (!(hc !== null ? hc === line : val.includes(String(line)))) continue;
       if (val.startsWith("over")) o.over = Number(v.odd);
       else if (val.startsWith("under")) o.under = Number(v.odd);
     }
@@ -116,50 +134,121 @@ function oddsSet(bets, live) {
   return Object.values(o).some((v) => v) ? o : null;
 }
 
+// ---------- İstatistik ayrıştırma (tüm maç / 1. yarı / 2. yarı) ----------
+const FIELDS = [["shots", "Total Shots"], ["sot", "Shots on Goal"], ["xg", "expected_goals"], ["red", "Red Cards"]];
+const emptyBlock = () => ({ shots: {}, sot: {}, xg: {}, red: {} });
+const has = (b) => b.shots.home !== undefined;
+const diff = (a, b) => (a == null || b == null ? null : Math.max(0, +(a - b).toFixed(3)));
+const numv = (v) => (typeof v === "number" ? v : typeof v === "string" && /^-?\d+(\.\d+)?$/.test(v) ? Number(v) : null);
+
 function parseStats(resp, m) {
-  const out = { shots: {}, sot: {}, xg: {} };
+  const out = { all: emptyBlock(), h1: emptyBlock(), h2: emptyBlock(), lists: { all: {}, h1: {}, h2: {} } };
   for (const t of resp) {
     const side = t.team.id === m.homeId ? "home" : t.team.id === m.awayId ? "away" : null;
-    if (!side || !t.statistics?.length) continue;
-    const g = (type) => t.statistics.find((s) => s.type === type)?.value;
-    out.shots[side] = Number(g("Total Shots") ?? 0);
-    out.sot[side] = Number(g("Shots on Goal") ?? 0);
-    const xg = g("expected_goals");
-    out.xg[side] = xg == null ? null : Number(xg);
+    if (!side) continue;
+    const put = (p, list) => {
+      if (!Array.isArray(list) || !list.length) return;
+      out.lists[p][side] = list;
+      for (const [k, type] of FIELDS) {
+        const v = list.find((s) => s.type === type)?.value;
+        out[p][k][side] = k === "xg" ? (v == null ? null : Number(v)) : Number(v ?? 0);
+      }
+    };
+    put("all", t.statistics);
+    for (const [k, v] of Object.entries(t)) {
+      if (k === "statistics" || !Array.isArray(v)) continue;
+      if (/1h|first|1st/i.test(k)) put("h1", v);
+      else if (/2h|second|2nd/i.test(k)) put("h2", v);
+    }
   }
+  // Eksik yarıyı tüm maçtan türet
+  if (!has(out.h1) && (m.short === "1H" || m.short === "HT")) out.h1 = out.all;
+  const mk = (x, y) => {
+    const r = emptyBlock();
+    for (const k of Object.keys(r)) for (const s of ["home", "away"]) if (x[k][s] !== undefined) r[k][s] = diff(x[k][s], y[k][s]);
+    return r;
+  };
+  if (has(out.h1) && !has(out.h2) && m.short !== "1H" && m.short !== "HT") out.h2 = mk(out.all, out.h1);
+  if (has(out.h2) && !has(out.h1)) out.h1 = mk(out.all, out.h2);
   return out;
 }
 
-function needs(rules, m) {
-  const n = { stats: false, live: false, pre: false };
-  for (const r of rules) {
-    if (r.matchId && String(r.matchId) !== String(m.id)) continue;
-    if (REQUIRE_XG) n.stats = true;
-    for (const c of r.conditions || []) {
-      if (c.metric.startsWith("pre_")) n.pre = true;
-      else if (c.metric.startsWith("live_")) n.live = true;
-      else if (/shots|sot|xg/.test(c.metric)) n.stats = true;
+const build = (H, A) => (H || []).map((s) => ({ type: s.type, home: s.value, away: A?.find((z) => z.type === s.type)?.value ?? null }));
+const diffList = (a, b) => (a || []).map((s) => {
+  const x = numv(s.value), y = numv(b?.find((z) => z.type === s.type)?.value);
+  return { type: s.type, value: x == null || y == null ? null : +(x - y).toFixed(2) };
+});
+function rowsOf(S, p, m) {
+  let H = S.lists[p].home, A = S.lists[p].away;
+  if (!H && p === "h1" && (m.short === "1H" || m.short === "HT")) { H = S.lists.all.home; A = S.lists.all.away; }
+  if (H) return build(H, A);
+  const o = p === "h2" ? S.lists.h1 : p === "h1" ? S.lists.h2 : null;
+  if (o?.home && S.lists.all.home) return build(diffList(S.lists.all.home, o.home), diffList(S.lists.all.away, o.away));
+  return [];
+}
+const blk = (b) => ({ shots: b.shots, shotsOnTarget: b.sot, xg: b.xg, red: b.red });
+
+// ---------- Son N dakika: geçmiş kayıtlarla hesaplanır (sunucu maçı izlediği sürece) ----------
+const copyB = (b) => ({ shots: { ...b.shots }, sot: { ...b.sot }, xg: { ...b.xg }, red: { ...b.red } });
+function record(x, m) {
+  if (!x.stats || !has(x.stats.all)) return;
+  (x.hist ||= []).push({ minute: m.minute, all: copyB(x.stats.all) });
+  if (x.hist.length > 800) x.hist.shift();
+}
+function windowBlock(hist, minute, N, cur) {
+  const r = { shots: {}, shotsOnTarget: {}, xg: {}, red: {} };
+  const target = minute - N;
+  let base = null;
+  if (target > 0) {
+    for (const h of hist || []) { if (h.minute <= target) base = h.all; else break; }
+    if (!base) return r; // yeterli geçmiş yok
+  }
+  for (const [k, kk] of [["shots", "shots"], ["shotsOnTarget", "sot"], ["xg", "xg"], ["red", "red"]]) {
+    for (const s of ["home", "away"]) {
+      const c = cur[kk][s], b = base ? base[kk][s] : 0;
+      r[k][s] = c == null || b == null ? null : Math.max(0, +(c - b).toFixed(3));
     }
   }
-  return n;
+  return r;
 }
+function lastWins(rules, m, hist, cur) {
+  const out = {};
+  for (const r of rules) {
+    if (r.matchId && String(r.matchId) !== String(m.id)) continue;
+    for (const c of r.conditions || []) {
+      if (c.period === "last") { const n = Math.max(1, Number(c.last) || 10); out["l" + n] = windowBlock(hist, m.minute, n, cur); }
+    }
+  }
+  return out;
+}
+const lastTot = (hist, m, cur) => {
+  const b = windowBlock(hist, m.minute, 10, cur);
+  const s = (o) => (o.home != null && o.away != null ? o.home + o.away : null);
+  return { shots: s(b.shots), sot: s(b.shotsOnTarget), xg: s(b.xg), red: s(b.red) };
+};
+
+// Bir kural bu maçı kapsıyorsa bildirim için tüm veriler (istatistik, oranlar) gerekir
+const needs = (rules, m) => {
+  const any = rules.some((r) => !r.matchId || String(r.matchId) === String(m.id));
+  return { stats: any, live: any, pre: any };
+};
 
 // ---------- Takip döngüsü ----------
 let schedule = [], scheduleAt = 0, liveMap = new Map();
 let liveOdds = new Map(), liveOddsAt = 0;
-const extra = new Map(); // id -> { raw, stats, statsAt, pre, preAt, detail, detailAt }
+const extra = new Map(); // id -> { stats, statsAt, hist, pre, preAt, detail, detailAt }
 let cache = { matches: [], updated: null, error: "" };
 let lastLog = "", polling = false;
 
 async function poll() {
-  if (polling) return;
+  if (polling || !active) return;
   polling = true;
   const warns = [];
   const safe = async (fn) => { try { await fn(); } catch (e) { warns.push(e.message); } };
   try {
     if (!API_KEY) { cache.error = "API_KEY tanımlı değil"; return; }
     const now = Date.now();
-    const slow = quota !== null && quota < 500 ? 4 : 1; // günlük hak azalınca yavaşla
+    const slow = quota !== null && quota < 500 ? 4 : 1;
     const rules = loadRules().filter((r) => r.enabled && !r.draft);
 
     if (now - scheduleAt > LIST * 1000) {
@@ -203,7 +292,7 @@ async function poll() {
       extra.set(m.id, x);
       if (n.stats && RUNNING.has(m.short) && now - (x.statsAt || 0) > STATS * 1000 * slow) {
         x.statsAt = now;
-        tasks.push(safe(async () => { x.raw = await api(`/fixtures/statistics?fixture=${m.id}`); x.stats = parseStats(x.raw, m); }));
+        tasks.push(safe(async () => { x.stats = parseStats(await fetchStats(m.id), m); record(x, m); }));
       }
       if (n.pre && preBudget > 0 && (x.preAt === undefined || (!x.pre && now - x.preAt > 1800000))) {
         preBudget--;
@@ -219,7 +308,12 @@ async function poll() {
 
     for (const m of playing) {
       const x = extra.get(m.id) || {};
-      const full = { ...m, preOdds: x.pre, liveOdds: liveOdds.get(m.id), shots: x.stats?.shots, shotsOnTarget: x.stats?.sot, xg: x.stats?.xg };
+      const S = x.stats;
+      const full = {
+        ...m, preOdds: x.pre, liveOdds: liveOdds.get(m.id),
+        shots: S?.all.shots, shotsOnTarget: S?.all.sot, xg: S?.all.xg, red: S?.all.red,
+        h1: S && blk(S.h1), h2: S && blk(S.h2), lastWin: S && lastWins(rules, m, x.hist, S.all),
+      };
       if (REQUIRE_XG && (full.xg?.home == null || full.xg?.away == null)) continue; // gol beklentisi yoksa bildirim yok
       for (const { rule, key } of findTriggered(rules, full, fired)) {
         await safe(async () => {
@@ -245,7 +339,7 @@ async function poll() {
 poll();
 setInterval(poll, POLL * 1000);
 
-// Maç detayı: tüm istatistikler ve oranlar (14 sn önbellek)
+// Maç detayı: tüm istatistikler (tümü / 1. yarı / 2. yarı / son 10 dk özeti) ve oranlar
 async function detail(m) {
   const now = Date.now();
   const x = extra.get(m.id) || {};
@@ -255,7 +349,7 @@ async function detail(m) {
   const safe = async (fn) => { try { await fn(); } catch (e) { warns.push(e.message); } };
   if (!x.statsAt || now - x.statsAt > 14000) {
     x.statsAt = now;
-    await safe(async () => { x.raw = await api(`/fixtures/statistics?fixture=${m.id}`); x.stats = parseStats(x.raw, m); });
+    await safe(async () => { x.stats = parseStats(await fetchStats(m.id), m); record(x, m); });
   }
   let live = null;
   if (m.inPlay) await safe(async () => { live = oddsSet((await api(`/odds/live?fixture=${m.id}`))[0]?.odds, true); });
@@ -263,12 +357,15 @@ async function detail(m) {
     x.preAt = now;
     await safe(async () => { x.pre = oddsSet((await api(`/odds?fixture=${m.id}&bookmaker=${BOOKMAKER_ID}`))[0]?.bookmakers?.[0]?.bets, false); });
   }
-  const rows = [];
-  const h = x.raw?.find((t) => t.team.id === m.homeId), a = x.raw?.find((t) => t.team.id === m.awayId);
-  for (const s of h?.statistics || []) rows.push({ type: s.type, home: s.value, away: a?.statistics?.find((z) => z.type === s.type)?.value ?? null });
-  const st = x.stats || {};
+  const S = x.stats;
   const sum = (o) => (o?.home != null && o?.away != null ? o.home + o.away : null);
-  x.detail = { stats: rows, odds: { pre: x.pre || null, live }, totals: { shots: sum(st.shots), sot: sum(st.sot), xg: sum(st.xg) }, warn: warns[0] || "" };
+  const tot = (b) => ({ shots: sum(b.shots), sot: sum(b.sot), xg: sum(b.xg), red: sum(b.red) });
+  x.detail = {
+    stats: S ? { all: rowsOf(S, "all", m), h1: rowsOf(S, "h1", m), h2: rowsOf(S, "h2", m) } : { all: [], h1: [], h2: [] },
+    totals: S ? { all: tot(S.all), h1: tot(S.h1), h2: tot(S.h2), l10: lastTot(x.hist, m, S.all) } : { all: {}, h1: {}, h2: {}, l10: {} },
+    odds: { pre: x.pre || null, live },
+    warn: warns[0] || "",
+  };
   x.detailAt = Date.now();
   return x.detail;
 }
@@ -288,15 +385,26 @@ app.post("/api/rules", auth, (req, res) => {
   res.json({ ok: true });
 });
 
+app.get("/api/state", auth, (req, res) => res.json({ active }));
+app.post("/api/state", auth, (req, res) => {
+  active = !!req.body?.active;
+  try { fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ active })); } catch (e) { console.error("settings yazılamadı:", e.message); }
+  if (active) { scheduleAt = 0; liveMap = new Map(); poll(); }
+  console.log("Durum:", active ? "AKTİF" : "PASİF");
+  res.json({ active });
+});
+
 app.get("/api/matches", auth, (req, res) => {
   res.json({
     matches: cache.matches.map(({ id, home, away, minute, status, homeGoals, awayGoals }) => ({ id, home, away, minute, status, homeGoals, awayGoals })),
     updated: cache.updated,
     error: cache.error,
+    active,
   });
 });
 
 app.get("/api/match/:id", auth, async (req, res) => {
+  if (!active) return res.json({ passive: true });
   const m = cache.matches.find((x) => String(x.id) === req.params.id);
   if (!m) return res.status(404).json({ error: "maç bulunamadı" });
   try { res.json(await detail(m)); } catch (e) { res.status(500).json({ error: e.message }); }
@@ -307,4 +415,4 @@ app.post("/api/test", auth, async (req, res) => {
   catch (e) { console.error(e.message); res.status(500).json({ error: "gönderilemedi" }); }
 });
 
-app.listen(process.env.PORT || 3000, () => console.log("Panel hazır."));
+app.listen(process.env.PORT || 3000, () => console.log("Panel hazır. Durum:", active ? "AKTİF" : "PASİF"));

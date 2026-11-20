@@ -176,4 +176,145 @@ function renderMatches(){
 const target=r=>r.matchId?esc(r.matchLabel||("Maç "+r.matchId)):"Tüm maçlar";
 const perT=c=>STAT.test(c.metric)&&c.period&&c.period!=="all"?(c.period==="last"?` (son ${c.last||10} dk)`:` (${PER.find(p=>p[0]===c.period)[1]})`):"";
 const winT=r=>(r.minFrom!=null||r.minTo!=null)?` · ${r.minFrom??""}–${r.minTo??""}'`:"";
-const
+const sumText=r=>r.conditions.length?r.conditions.map(c=>`${LBL[c.metric]||c.metric}${perT(c)} ${opT(c.op)} ${c.value}`).join(" ve "):"koşul yok";
+
+function body(r,i){
+  const missing=r.matchId&&!matches.some(m=>same(m.id,r.matchId));
+  const opts=`<option value="">Tüm maçlar</option>`
+    +(missing?`<option value="${esc(r.matchId)}" selected>${esc(r.matchLabel||r.matchId)} (listede yok)</option>`:"")
+    +matches.map(m=>`<option value="${esc(m.id)}" ${r.matchId&&same(m.id,r.matchId)?"selected":""}>${esc(m.home)} – ${esc(m.away)}${isLive(m)?` (${esc(m.minute)}')`:""}</option>`).join("");
+  return `<div class="rb">
+    <label class="f">Kural adı<input type="text" value="${esc(r.name)}" data-r="${i}" data-f="name"></label>
+    <label class="f">Çalışacağı maç<select data-r="${i}" data-f="target">${opts}</select></label>
+    <div class="f">Çalışacağı dakika aralığı (boşsa tüm maç)</div>
+    <div class="mm"><input type="number" inputmode="numeric" placeholder="başlangıç" value="${esc(r.minFrom)}" data-r="${i}" data-f="minFrom"><span>–</span><input type="number" inputmode="numeric" placeholder="bitiş" value="${esc(r.minTo)}" data-r="${i}" data-f="minTo"></div>
+    <div class="f">Koşullar (hepsi doğru olunca bildirim gider)</div>
+    ${r.conditions.map((c,j)=>`<div class="c">
+      <select data-r="${i}" data-j="${j}" data-f="metric">${GROUPS.map(g=>`<optgroup label="${g[0]}">${g[1].map(m=>`<option value="${m[0]}" ${m[0]===c.metric?"selected":""}>${esc(LBL[m[0]])}</option>`).join("")}</optgroup>`).join("")}</select>
+      <select data-r="${i}" data-j="${j}" data-f="op">${OPV.map(o=>`<option value="${o[0]}" ${o[0]===c.op?"selected":""}>${esc(o[1])}</option>`).join("")}</select>
+      <input type="number" step="any" inputmode="decimal" value="${esc(c.value)}" data-r="${i}" data-j="${j}" data-f="value">
+      <button class="x" data-del="${i}.${j}" aria-label="Koşulu sil">✕</button>
+      ${STAT.test(c.metric)?`<div class="pr"><select data-r="${i}" data-j="${j}" data-f="period" aria-label="Dönem">${PER.map(p=>`<option value="${p[0]}" ${(c.period||"all")===p[0]?"selected":""}>Dönem: ${p[1]}</option>`).join("")}</select>${c.period==="last"?`<input type="number" min="1" inputmode="numeric" value="${esc(c.last??10)}" data-r="${i}" data-j="${j}" data-f="last" aria-label="Dakika"><span class="mute">dk</span>`:""}</div>`:""}
+    </div>`).join("")}
+    <div class="row"><button class="ghost" data-addc="${i}">＋ Koşul</button><button class="x" data-delr="${i}">${r.draft?"Vazgeç":"Kuralı sil"}</button></div>
+    <div class="row"><span class="mute">${r.draft?"Kaydedilene kadar çalışmaz.":""}</span><button class="go" data-save="${esc(r.id)}">${r.draft?"Kaydet ve başlat":"Kaydet"}</button></div>
+  </div>`;
+}
+
+function renderRules(){
+  const L=rules.map((r,i)=>{
+    const o=open===r.id;
+    return `<div class="r ${r.enabled?"":"off"} ${r.draft?"dr":""}">
+      <div class="rh">
+        ${r.draft?'<span class="bd">TASLAK</span>':`<label class="sw"><input type="checkbox" data-en="${i}" ${r.enabled?"checked":""} aria-label="Kural açık"><span></span></label>`}
+        <div class="t" data-open="${esc(r.id)}"><div class="n">${esc(r.name)||"İsimsiz"}</div><div class="s">${r.matchId?"⚽ ":""}${target(r)}${winT(r)} · ${esc(sumText(r))}</div></div>
+        <button class="chev" data-open="${esc(r.id)}" aria-label="Aç/kapat">${o?"▾":"▸"}</button>
+      </div>${o?body(r,i):""}</div>`}).join("");
+  $("pr").innerHTML=`<button class="ghost" data-newall>＋ Tüm maçlar için kural</button>`+(L||`<p class="empty">Kural yok. Maçlar sekmesinden bir maç seç ya da yukarıdan ekle.</p>`);
+}
+
+function render(){
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===tab));
+  $("pm").hidden=tab!=="m";$("pr").hidden=tab!=="r";
+  tab==="m"?renderMatches():renderRules();
+  status();
+}
+
+function addRule(m){
+  const lbl=m?`${m.home} – ${m.away}`:"";
+  const r={id:uid(),name:m?lbl:"Yeni kural",enabled:true,draft:true,matchId:m?String(m.id):null,matchLabel:lbl,minFrom:null,minTo:null,conditions:[newCond()]};
+  rules.unshift(r);open=r.id;tab="r";render();window.scrollTo(0,0);
+}
+
+async function saveAll(activate){
+  const list=rules.filter(r=>!r.draft||r.id===activate);
+  const bad=list.find(r=>!r.conditions.length||r.conditions.some(c=>Number.isNaN(c.value)||(c.period==="last"&&!(c.last>0))));
+  if(bad)return alert(`"${bad.name}" kuralında boş bir değer ya da koşul yok.`);
+  const payload=list.map(({draft,...r})=>r);
+  const r=await fetch("/api/rules",{method:"POST",headers:H(),body:JSON.stringify({rules:payload})});
+  if(!r.ok)return alert("Kaydedilemedi, şifreyi kontrol et.");
+  const a=rules.find(x=>x.id===activate);
+  if(a){a.draft=false;a.enabled=true;open=null}
+  dirty(false);render();toast(a?"Kural kaydedildi, çalışıyor ✅":"Kaydedildi ✅");
+}
+
+document.addEventListener("input",e=>{
+  const t=e.target,d=t.dataset;
+  if(d.en!==undefined){rules[d.en].enabled=t.checked;dirty(true);render();return}
+  if(d.r===undefined)return;
+  const r=rules[d.r];dirty(true);
+  if(d.j!==undefined){
+    const c=r.conditions[d.j];
+    c[d.f]=(d.f==="value"||d.f==="last")?parseFloat(t.value):t.value;
+    if(d.f==="period"&&t.value==="last"&&!(c.last>0))c.last=10;
+    if(d.f==="metric"||d.f==="period")render();
+    return;
+  }
+  if(d.f==="minFrom"||d.f==="minTo"){const v=parseFloat(t.value);r[d.f]=Number.isNaN(v)?null:v;return}
+  if(d.f==="target"){
+    const m=matches.find(x=>same(x.id,t.value));
+    const keep=t.value&&r.matchId&&same(r.matchId,t.value);
+    r.matchLabel=m?`${m.home} – ${m.away}`:(keep?r.matchLabel:"");
+    r.matchId=t.value||null;render();return;
+  }
+  r[d.f]=t.value;
+});
+document.addEventListener("click",e=>{
+  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om],[data-per]");
+  if(!b)return;const d=b.dataset;
+  if(d.tab){tab=d.tab;render();return}
+  if(d.per){dper=d.per;renderMatches();return}
+  if(d.open){open=open===d.open?null:d.open;render();return}
+  if(d.newm!==undefined){addRule(matches.find(x=>same(x.id,d.newm))||null);return}
+  if(d.om!==undefined){openM=same(openM,d.om)?null:d.om;renderMatches();if(openM)loadDetail(openM);return}
+  if(d.newall!==undefined){addRule(null);return}
+  if(d.save){saveAll(d.save);return}
+  if(d.addc!==undefined){rules[d.addc].conditions.push(newCond());dirty(true);render();return}
+  if(d.del){const[i,j]=d.del.split(".");rules[i].conditions.splice(j,1);dirty(true);render();return}
+  if(d.delr!==undefined){const r=rules[d.delr];if(r.draft||confirm("Bu kural silinsin mi?")){rules.splice(d.delr,1);open=null;if(!r.draft)dirty(true);render()}}
+});
+$("q").oninput=renderMatches;
+
+$("act").onclick=async()=>{
+  const want=!active;
+  if(!want&&!confirm("Pasif yapılırsa API'ye sorgu atılmaz ve bildirim gitmez. Devam edilsin mi?"))return;
+  const r=await fetch("/api/state",{method:"POST",headers:H(),body:JSON.stringify({active:want})});
+  if(!r.ok)return alert("Durum değiştirilemedi, şifreyi kontrol et.");
+  active=(await r.json()).active;status();
+  toast(active?"Aktif: takip başladı ✅":"Pasif: API'ye sorgu atılmıyor");
+  if(active)setTimeout(loadMatches,4000);
+};
+$("save").onclick=()=>saveAll(null);
+$("test").onclick=async()=>{
+  const r=await fetch("/api/test",{method:"POST",headers:H()});
+  alert(r.ok?"Test mesajı gönderildi.":"Gönderilemedi.");
+};
+
+async function loadDetail(id){
+  try{const r=await fetch("/api/match/"+encodeURIComponent(id),{headers:H()});det[id]=r.ok?await r.json():{error:"Veri alınamadı"}}
+  catch{det[id]={error:"Bağlantı hatası"}}
+  if(tab==="m"&&same(openM,id))renderMatches();
+}
+async function loadMatches(){
+  try{
+    const r=await fetch("/api/matches",{headers:H()});
+    const d=await r.json();
+    matches=d.matches||[];updated=d.updated;err=d.error||"";active=d.active!==false;
+  }catch{err="Bağlantı hatası"}
+  status();
+  if(tab==="m")renderMatches();
+  if(openM&&active)loadDetail(openM);
+}
+
+(async()=>{
+  const r=await fetch("/api/rules",{headers:H()});
+  if(r.status===401){localStorage.removeItem("pw");alert("Şifre yanlış, sayfayı yenile.");return}
+  localStorage.setItem("pw",pw);
+  rules=(await r.json()).rules||[];
+  rules.forEach(x=>{x.conditions=x.conditions||[];if(x.matchId===undefined)x.matchId=null});
+  await loadMatches();render();
+  setInterval(loadMatches,15000);
+})();
+</script>
+</body>
+</html>

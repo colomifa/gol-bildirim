@@ -1,7 +1,7 @@
 import express from "express";
 import fs from "fs";
 import path from "path";
-import { findTriggered, formatAlert } from "./rules.mjs";
+import { findTriggered, formatAlert, condsMatch, toMetrics, pkey } from "./rules.mjs";
 
 const env = process.env;
 const { BOT_TOKEN, CHAT_ID, PANEL_PASSWORD, API_KEY, DATA_DIR = ".", TIMEZONE = "Europe/Istanbul", BOOKMAKER_ID = "8" } = env;
@@ -10,6 +10,8 @@ const POLL = sec(env.POLL_SECONDS, 15, 15);
 const STATS = sec(env.STATS_SECONDS, 15, 15);
 const ODDS = sec(env.ODDS_SECONDS, 15, 15);
 const LIST = sec(env.LIST_SECONDS, 600, 120);
+const FILTER_SECONDS = sec(env.FILTER_SECONDS, 60, 30); // canlı filtre için maç başına istatistik aralığı
+const FILTER_BUDGET = sec(env.FILTER_BUDGET, 8, 1);     // filtre için bir turda en fazla istatistik isteği
 const REQUIRE_XG = env.REQUIRE_XG !== "0";
 const LEAGUES = (env.LEAGUE_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -70,6 +72,19 @@ async function fetchStats(id) {
     }
   }
   return api(`/fixtures/statistics?fixture=${id}`);
+}
+
+// Gol olayları (dakikalarıyla). Kendi kalesine golde taraf, güncel skorla eşleşen yönle belirlenir.
+async function fetchGoals(m) {
+  const ev = (await api(`/fixtures/events?fixture=${m.id}`)).filter((e) => e.type === "Goal" && !/missed|cancel/i.test(e.detail || ""));
+  const mk = (flip) => ev.map((e) => {
+    let side = e.team?.id === m.homeId ? "home" : "away";
+    if (flip && /own/i.test(e.detail || "")) side = side === "home" ? "away" : "home";
+    return { minute: Number(e.time?.elapsed ?? 0), side };
+  });
+  const ok = (l) => l.filter((g) => g.side === "home").length === (m.homeGoals ?? 0) && l.filter((g) => g.side === "away").length === (m.awayGoals ?? 0);
+  const a = mk(false), b = mk(true);
+  return ok(a) ? a : ok(b) ? b : a;
 }
 
 const today = () => new Intl.DateTimeFormat("sv-SE", { timeZone: TIMEZONE }).format(new Date());
@@ -188,44 +203,61 @@ function rowsOf(S, p, m) {
 }
 const blk = (b) => ({ shots: b.shots, shotsOnTarget: b.sot, xg: b.xg, red: b.red });
 
-// ---------- Son N dakika: geçmiş kayıtlarla hesaplanır (sunucu maçı izlediği sürece) ----------
+// ---------- Zaman pencereleri: yarı, son N dk, dakika aralığı ----------
+// Şut/xG/kart: izlenen anlık kayıtlardan (geçmiş) hesaplanır. Gol: gol olaylarından.
 const copyB = (b) => ({ shots: { ...b.shots }, sot: { ...b.sot }, xg: { ...b.xg }, red: { ...b.red } });
 function record(x, m) {
   if (!x.stats || !has(x.stats.all)) return;
   (x.hist ||= []).push({ minute: m.minute, all: copyB(x.stats.all) });
   if (x.hist.length > 800) x.hist.shift();
 }
-function windowBlock(hist, minute, N, cur) {
-  const r = { shots: {}, shotsOnTarget: {}, xg: {}, red: {} };
-  const target = minute - N;
-  let base = null;
-  if (target > 0) {
-    for (const h of hist || []) { if (h.minute <= target) base = h.all; else break; }
-    if (!base) return r; // yeterli geçmiş yok
-  }
-  for (const [k, kk] of [["shots", "shots"], ["shotsOnTarget", "sot"], ["xg", "xg"], ["red", "red"]]) {
-    for (const s of ["home", "away"]) {
-      const c = cur[kk][s], b = base ? base[kk][s] : 0;
-      r[k][s] = c == null || b == null ? null : Math.max(0, +(c - b).toFixed(3));
-    }
+const KEYS = [["shots", "shots"], ["shotsOnTarget", "sot"], ["xg", "xg"], ["red", "red"]];
+const emptyWin = () => ({ shots: {}, shotsOnTarget: {}, xg: {}, red: {} });
+const histAt = (hist, minute) => { let b = null; for (const h of hist || []) { if (h.minute <= minute) b = h.all; else break; } return b; };
+
+function rangeBlock(hist, curMin, cur, a, b) {
+  const r = emptyWin();
+  const end = curMin <= b ? cur : histAt(hist, b);
+  const start = a <= 0 ? "zero" : histAt(hist, a);
+  if (!end || !start) return r; // yeterli geçmiş yok
+  for (const [k, kk] of KEYS) for (const s of ["home", "away"]) {
+    const e = end[kk][s], st = start === "zero" ? 0 : start[kk][s];
+    r[k][s] = e == null || st == null ? null : Math.max(0, +(e - st).toFixed(3));
   }
   return r;
 }
-function lastWins(rules, m, hist, cur) {
-  const out = {};
-  for (const r of rules) {
-    if (r.matchId && String(r.matchId) !== String(m.id)) continue;
-    for (const c of r.conditions || []) {
-      if (c.period === "last") { const n = Math.max(1, Number(c.last) || 10); out["l" + n] = windowBlock(hist, m.minute, n, cur); }
-    }
+const cntGoals = (list, a, b) => { const r = { home: 0, away: 0 }; for (const g of list) if (g.minute >= a && g.minute <= b) r[g.side]++; return r; };
+
+function buildWin(keys, m, x) {
+  const S = x.stats, win = {};
+  for (const key of keys) {
+    let a, b;
+    if (key === "h1") [a, b] = [0, 45];
+    else if (key === "h2") [a, b] = [46, 200];
+    else if (key[0] === "l") { a = Math.max(0, m.minute - Number(key.slice(1))); b = 200; }
+    else [a, b] = key.slice(1).split("-").map(Number);
+    let st = emptyWin();
+    if (S) st = key === "h1" ? { ...blk(S.h1) } : key === "h2" ? { ...blk(S.h2) } : rangeBlock(x.hist, m.minute, S.all, a, b);
+    st.goals = x.goals ? cntGoals(x.goals, key[0] === "l" ? a + 1 : a, b) : {};
+    win[key] = st;
   }
-  return out;
+  return win;
 }
-const lastTot = (hist, m, cur) => {
-  const b = windowBlock(hist, m.minute, 10, cur);
-  const s = (o) => (o.home != null && o.away != null ? o.home + o.away : null);
-  return { shots: s(b.shots), sot: s(b.shotsOnTarget), xg: s(b.xg), red: s(b.red) };
-};
+
+const SCOPE = /goals|goal_diff|shots|sot|xg|red/, GOALM = /goals|goal_diff/, STATM = /shots|sot|xg|red/;
+function condInfo(conds) {
+  const keys = new Set();
+  let goals = false;
+  for (const c of conds) {
+    if (!SCOPE.test(c.metric)) continue;
+    const k = pkey(c);
+    if (k === "all") continue;
+    keys.add(k);
+    if (GOALM.test(c.metric)) goals = true;
+  }
+  return { keys, goals };
+}
+const scopeConds = (rules, m) => rules.filter((r) => !r.matchId || String(r.matchId) === String(m.id)).flatMap((r) => r.conditions || []);
 
 // Bir kural bu maçı kapsıyorsa bildirim için tüm veriler (istatistik, oranlar) gerekir
 const needs = (rules, m) => {
@@ -236,9 +268,10 @@ const needs = (rules, m) => {
 // ---------- Takip döngüsü ----------
 let schedule = [], scheduleAt = 0, liveMap = new Map();
 let liveOdds = new Map(), liveOddsAt = 0;
-const extra = new Map(); // id -> { stats, statsAt, hist, pre, preAt, detail, detailAt }
+const extra = new Map(); // id -> { stats, statsAt, hist, goals, evTotal, evAt, pre, preAt, detail, detailAt }
 let cache = { matches: [], updated: null, error: "" };
 let lastLog = "", polling = false;
+let filterWanted = 0, filterSpec = { conditions: [], sort: null }; // canlı filtre: panel açıkken istatistik çekilir
 
 async function poll() {
   if (polling || !active) return;
@@ -281,19 +314,35 @@ async function poll() {
       });
     }
 
+    const filterOn = now - filterWanted < 120000;
+    const fConds = filterOn ? [...filterSpec.conditions, ...(filterSpec.sort ? [filterSpec.sort] : [])] : [];
+    const fStats = fConds.some((c) => STATM.test(c.metric));
+    let fBudget = FILTER_BUDGET, preBudget = 5;
     const tasks = [];
-    let preBudget = 5;
     for (const m of all) {
       const upcoming = m.short === "NS" && m.kickoff * 1000 - now < 3 * 3600000;
       if (!m.inPlay && !upcoming) continue;
       const n = needs(rules, m);
-      if (!n.stats && !n.pre) continue;
+      const fw = filterOn && m.inPlay;
+      if (!n.stats && !n.pre && !fw) continue;
       const x = extra.get(m.id) || {};
       extra.set(m.id, x);
-      if (n.stats && RUNNING.has(m.short) && now - (x.statsAt || 0) > STATS * 1000 * slow) {
+
+      let wantStats = n.stats && RUNNING.has(m.short) && now - (x.statsAt || 0) > STATS * 1000 * slow;
+      if (!wantStats && fw && fStats && RUNNING.has(m.short) && fBudget > 0 && now - (x.statsAt || 0) > FILTER_SECONDS * 1000 * slow) { wantStats = true; fBudget--; }
+      if (wantStats) {
         x.statsAt = now;
         tasks.push(safe(async () => { x.stats = parseStats(await fetchStats(m.id), m); record(x, m); }));
       }
+
+      // Zaman penceresi içinde gol koşulu varsa gol olaylarını çek (skor değişince yenilenir)
+      const info = condInfo([...scopeConds(rules, m), ...(fw ? fConds : [])]);
+      const gt = (m.homeGoals ?? 0) + (m.awayGoals ?? 0);
+      if (info.goals && m.inPlay && x.evTotal !== gt && now - (x.evAt || 0) > 20000) {
+        x.evAt = now;
+        tasks.push(safe(async () => { x.goals = await fetchGoals(m); x.evTotal = x.goals.length; }));
+      }
+
       if (n.pre && preBudget > 0 && (x.preAt === undefined || (!x.pre && now - x.preAt > 1800000))) {
         preBudget--;
         x.preAt = now;
@@ -312,7 +361,7 @@ async function poll() {
       const full = {
         ...m, preOdds: x.pre, liveOdds: liveOdds.get(m.id),
         shots: S?.all.shots, shotsOnTarget: S?.all.sot, xg: S?.all.xg, red: S?.all.red,
-        h1: S && blk(S.h1), h2: S && blk(S.h2), lastWin: S && lastWins(rules, m, x.hist, S.all),
+        win: buildWin(condInfo(scopeConds(rules, m)).keys, m, x),
       };
       if (REQUIRE_XG && (full.xg?.home == null || full.xg?.away == null)) continue; // gol beklentisi yoksa bildirim yok
       for (const { rule, key } of findTriggered(rules, full, fired)) {
@@ -360,9 +409,10 @@ async function detail(m) {
   const S = x.stats;
   const sum = (o) => (o?.home != null && o?.away != null ? o.home + o.away : null);
   const tot = (b) => ({ shots: sum(b.shots), sot: sum(b.sot), xg: sum(b.xg), red: sum(b.red) });
+  const l10 = S ? rangeBlock(x.hist, m.minute, S.all, Math.max(0, m.minute - 10), 200) : emptyWin();
   x.detail = {
     stats: S ? { all: rowsOf(S, "all", m), h1: rowsOf(S, "h1", m), h2: rowsOf(S, "h2", m) } : { all: [], h1: [], h2: [] },
-    totals: S ? { all: tot(S.all), h1: tot(S.h1), h2: tot(S.h2), l10: lastTot(x.hist, m, S.all) } : { all: {}, h1: {}, h2: {}, l10: {} },
+    totals: S ? { all: tot(S.all), h1: tot(S.h1), h2: tot(S.h2), l10: { shots: sum(l10.shots), sot: sum(l10.shotsOnTarget), xg: sum(l10.xg), red: sum(l10.red) } } : { all: {}, h1: {}, h2: {}, l10: {} },
     odds: { pre: x.pre || null, live },
     warn: warns[0] || "",
   };
@@ -408,6 +458,42 @@ app.get("/api/match/:id", auth, async (req, res) => {
   const m = cache.matches.find((x) => String(x.id) === req.params.id);
   if (!m) return res.status(404).json({ error: "maç bulunamadı" });
   try { res.json(await detail(m)); } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Canlı filtre: tüm canlı maçlar üzerinde koşullar + sıralama
+const OPSET = new Set([">=", ">", "<=", "<", "=="]);
+const ALLOWED = /^((home|away|total)_(goals|shots|sot|xg|red)|goal_diff|minute)$/;
+const cleanCond = (c) => ({
+  metric: String(c.metric || ""), op: OPSET.has(c.op) ? c.op : ">=", value: Number(c.value),
+  period: ["all", "h1", "h2", "last", "range"].includes(c.period) ? c.period : "all",
+  last: Number(c.last) || 10, from: Number(c.from) || 0, to: Number(c.to) || 200,
+});
+app.post("/api/filter", auth, (req, res) => {
+  if (!active) return res.json({ passive: true });
+  const conditions = (req.body?.conditions || []).map(cleanCond).filter((c) => ALLOWED.test(c.metric) && Number.isFinite(c.value));
+  const s = req.body?.sort;
+  const sort = s && ALLOWED.test(s.metric || "") ? cleanCond({ ...s, value: 0 }) : null;
+  filterWanted = Date.now();
+  filterSpec = { conditions, sort };
+  const all = [...conditions, ...(sort ? [sort] : [])];
+  const needStats = all.some((c) => STATM.test(c.metric));
+  const info = condInfo(all);
+  const rows = [];
+  let pending = 0, total = 0;
+  for (const m of cache.matches) {
+    if (!m.inPlay) continue;
+    total++;
+    const x = extra.get(m.id) || {};
+    const S = x.stats;
+    if (needStats && !S) { pending++; continue; }
+    const full = { ...m, shots: S?.all.shots, shotsOnTarget: S?.all.sot, xg: S?.all.xg, red: S?.all.red, win: buildWin(info.keys, m, x) };
+    if (!condsMatch(conditions, full)) continue;
+    const value = sort ? toMetrics(full, pkey(sort))[sort.metric] : null;
+    rows.push({ id: m.id, home: m.home, away: m.away, minute: m.minute, status: m.status, homeGoals: m.homeGoals, awayGoals: m.awayGoals, xg: S?.all.xg || null, shots: S?.all.shots || null, value });
+  }
+  if (sort) rows.sort((a, b) => (b.value ?? -1) - (a.value ?? -1));
+  else rows.sort((a, b) => b.minute - a.minute);
+  res.json({ rows: rows.slice(0, 40), total, pending, updated: Date.now() });
 });
 
 app.post("/api/test", auth, async (req, res) => {

@@ -285,7 +285,7 @@ function detailHtml(m){
     <table><tr><th></th><th>1</th><th>X</th><th>2</th><th>2.5 Üst</th><th>2.5 Alt</th></tr>${row("Maç önü",o.pre)}${row("Canlı",o.live)}</table>
     <div class="pt">${TABS.map(p=>`<button data-per="${p[0]}" class="${p[0]===dper?"on":""}">${p[1]}</button>`).join("")}</div>
     <p class="tot">Toplam şut <b class="mono">${f(T.shots)}</b> · isabetli <b class="mono">${f(T.sot)}</b> · xG <b class="mono">${T.xg==null?"–":T.xg.toFixed(2)}</b> · kırmızı <b class="mono">${f(T.red)}</b></p>
-    ${rows.length?`<table class="sx">${rows.map(s=>`<tr><td>${f(s.home)}</td><td>${esc(SN[s.type]||s.type)}</td><td>${f(s.away)}</td></tr>`).join("")}</table>`:`<p class="mute">${dper==="l10"?"Son 10 dk yalnızca özet gösterir. Sunucu bu maçı en az 10 dk izlediyse dolar.":"Bu dönem için istatistik yok."}</p>`}
+    ${rows.length?`<table class="sx">${rows.map(s=>`<tr><td>${f(s.home)}</td><td>${esc(SN[s.type]||s.type)}</td><td>${f(s.away)}</td></tr>`).join("")}</table>`:`<p class="mute">${dper==="l10"?"Son 10 dakika farkı, sunucunun 10 dakika önceki kaydıyla güncel istatistikler karşılaştırılarak hesaplanır. Yeterli geçmiş kayıt henüz oluşmadıysa biraz bekleyin.":"Bu dönem için istatistik yok."}</p>`}
     ${d.warn?`<p class="mute">${esc(d.warn)}</p>`:""}</div>`;
 }
 
@@ -340,10 +340,10 @@ function renderAndFilter(){
       <div><div class="f" style="margin:0">AND filtresi</div><span class="mute">Filtreyi açıp kapatabilirsin.</span></div>
       <button class="${andFlt.on?"go":"ghost"}" id="andtoggle">${andFlt.on?"● AKTİF":"○ PASİF"}</button>
     </div>
-    <div class="f">Yeni AND koşulları</div>
-    <p class="mute">Bu koşullar mevcut filtreyle birlikte uygulanır. Listedeki bütün koşulların aynı anda doğru olması gerekir.</p>
-    ${andFlt.conditions.map((c,j)=>condRow(c,`data-ac="${j}"`,`data-adel="${j}"`,FG)).join("")}
-    <div class="row"><button class="ghost" id="andaddc">＋ Koşul ekle</button><button class="x" id="andclear">Temizle</button></div>
+    <div class="f">AND koşulları · ${andFlt.conditions.length} koşul</div>
+    <p class="mute">Her satır ayrı bir koşuldur. 2., 3. ve daha fazla koşul ekleyebilirsin. Bildirim/sonuç için hepsinin aynı anda doğru olması gerekir.</p>
+    ${andFlt.conditions.map((c,j)=>`<div class="f">${j+1}. koşul</div>${condRow(c,`data-ac="${j}"`,`data-adel="${j}"`,FG)}`).join("")}
+    <div class="row"><button class="ghost" id="andaddc">＋ ${andFlt.conditions.length+1}. koşul ekle</button><button class="x" id="andclear">Temizle</button></div>
     <div class="row"><span class="mute">Yalnızca son alınan maç ve istatistik verisi kullanılır.</span><button class="go" id="andapply">Uygula</button></div>`;
 }
 

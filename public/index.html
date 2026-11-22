@@ -41,7 +41,18 @@ nav button:hover{color:var(--ink);background:rgba(255,255,255,.035)}
 nav button.on{color:var(--accent);border-color:var(--accent);background:linear-gradient(180deg,rgba(163,243,107,.08),transparent)}
 nav b{font:700 11px "IBM Plex Mono",monospace;background:var(--surface-3);border-radius:7px;padding:2px 7px;margin-left:7px;color:#c8d7e9}
 main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
-#pm,#pr{min-width:0}
+#pm,#pr,#pg{min-width:0}
+#pg:before{content:"CANLI GOL TAHMİN MERKEZİ";display:block;color:var(--accent);font:700 10px "IBM Plex Mono",monospace;letter-spacing:.16em;margin:0 0 8px}
+#pg:after{content:"Son 10 ve 15 dakikadaki hücum istatistiklerinden üretilen baskı puanları. Yüzde veya kesin olasılık değildir.";display:block;color:var(--muted);font-size:13px;margin:-2px 0 18px}
+.ga-summary{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px}
+.ga-stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 14px;min-width:110px}
+.ga-stat small{display:block;color:var(--muted);font-size:11px}.ga-stat b{display:block;font:700 21px "IBM Plex Mono",monospace;margin-top:3px}
+.ga-card{background:linear-gradient(120deg,rgba(16,25,39,.98),rgba(13,22,35,.98));border:1px solid var(--line);border-radius:14px;padding:15px;margin-bottom:10px}
+.ga-top{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.ga-teams{font-weight:750;font-size:15px}.ga-meta{color:var(--muted);font-size:11px;margin-top:4px}
+.ga-scores{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px}.ga-window{background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:10px;padding:10px}.ga-window small{color:var(--muted);font-size:11px}.ga-window b{display:block;font:700 23px "IBM Plex Mono",monospace;margin:4px 0}.ga-window em{font-style:normal;font-size:11px;color:var(--muted)}
+.ga-track{height:6px;background:#25344a;border-radius:9px;overflow:hidden;margin-top:6px}.ga-track i{display:block;height:100%;background:var(--accent);border-radius:9px}
+.ga-details{color:var(--muted);font-size:11px;margin-top:10px;line-height:1.7}.ga-empty{padding:30px 18px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:14px}
+@media(max-width:700px){nav{gap:2px}nav button{padding:11px 9px;font-size:12px}.ga-scores{gap:7px}.ga-window{padding:8px}.ga-window b{font-size:20px}}
 #pm:before{content:"CANLI TAKİP MERKEZİ";display:block;color:var(--accent);font:700 10px "IBM Plex Mono",monospace;letter-spacing:.16em;margin:0 0 8px}
 #pm:after{content:"Maçları keşfet, istatistikleri incele ve tek dokunuşla bildirim kuralı oluştur.";display:block;color:var(--muted);font-size:13px;margin:-2px 0 22px}
 #pr:before{content:"BİLDİRİM OTOMASYONU";display:block;color:var(--accent);font:700 10px "IBM Plex Mono",monospace;letter-spacing:.16em;margin:0 0 8px}
@@ -157,6 +168,7 @@ main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
   <nav>
     <button data-tab="d">Dashboard</button>
     <button data-tab="m" class="on">Maçlar <b id="nm">0</b></button>
+    <button data-tab="g">Gol Analizi</button>
     <button data-tab="r">Kurallar <b id="nr">0</b></button>
   </nav>
 </div></header>
@@ -176,6 +188,7 @@ main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
     <input id="q" type="search" placeholder="Takım ara...">
     <div id="list"></div>
   </div>
+  <div id="pg" hidden></div>
   <div id="pr" hidden></div>
 </main>
 <div class="bar"><button id="save">Kaydet</button><button id="test">Test mesajı</button></div>
@@ -305,143 +318,7 @@ function renderMatches(){
   if(filtering){
     const R=fres;
     if(!R){$("list").innerHTML='<p class="empty">Filtre uygulanıyor...</p>';return}
-    if(R.error){$("list").innerHTML=`<p class="empty">${esc(R.error)}</p>`;return}
-    if(R.passive){$("list").innerHTML='<p class="empty">Pasif: filtre çalışmıyor.</p>';return}
-    const v=x=>x==null?"–":(Math.round(x*100)/100);
-    const head=`<p class="mute">Canlı ${R.total} maç · ${R.rows.length} eşleşti${R.pending?` · ${R.pending} maç için veri bekleniyor`:""}</p>`;
-    $("list").innerHTML=head+(R.rows.length?R.rows.map(m=>rowHtml(m,`<div class="xl">xG ${v(m.xg?.home)}–${v(m.xg?.away)} · şut ${v(m.shots?.home)}–${v(m.shots?.away)}${flt.on&&flt.sort.metric?` · <b>${v(m.value)}</b>`:""}</div>`)).join(""):`<p class="empty">Bu filtreye uyan canlı maç yok.</p>`);
-    return;
-  }
-  const q=$("q").value.trim().toLowerCase();
-  const L=matches.filter(m=>!q||(m.home+" "+m.away).toLowerCase().includes(q)).sort((a,b)=>isLive(b)-isLive(a));
-  $("list").innerHTML=L.length?L.map(m=>rowHtml(m)).join(""):`<p class="empty">${matches.length?"Eşleşen maç yok.":"Maç verisi yok. Skor API'si bağlı mı?"}</p>`;
-}
-
-// ---- Canlı filtre ----
-function renderFilter(){
-  $("fbtn").textContent=(flt.on?"● ":"")+"Canlı filtre"+(flt.on?" (açık)":"");
-  $("fpanel").hidden=!fopen;
-  if(!fopen)return;
-  const s=flt.sort;
-  $("fpanel").innerHTML=`
-    <div class="f" style="margin-top:0">Sırala (en yüksek üstte)</div>
-    <div class="c one"><select data-fs="1" data-f="metric">${SORTM.map(o=>`<option value="${o[0]}" ${s.metric===o[0]?"selected":""}>${o[1]}</option>`).join("")}</select>${s.metric?perHtml(s,'data-fs="1"'):""}</div>
-    <div class="f">Filtreler (hepsi birlikte uygulanır)</div>
-    ${flt.conditions.map((c,j)=>condRow(c,`data-fc="${j}"`,`data-fdel="${j}"`,FG)).join("")||'<p class="mute">Koşul yok: tüm canlı maçlar listelenir.</p>'}
-    <div class="row"><button class="ghost" id="faddc">＋ Koşul</button><button class="x" id="fclear">Temizle</button></div>
-    <div class="row"><span class="mute">Filtre mevcut önbellekteki veriyi kullanır; yeni API sorgusu başlatmaz.</span><button class="go" id="fapply">Uygula</button></div>`;
-}
-function renderAndFilter(){
-  $("andbtn").textContent=(andFlt.on?"● ":"＋ ")+"Yeni AND filtresi"+(andFlt.on?" (açık)":"");
-  $("andpanel").hidden=!andOpen;
-  if(!andOpen)return;
-  $("andpanel").innerHTML=`
-    <div class="row" style="margin-top:0;margin-bottom:12px">
-      <div><div class="f" style="margin:0">AND filtresi</div><span class="mute">Filtreyi açıp kapatabilirsin.</span></div>
-      <button class="${andFlt.on?"go":"ghost"}" id="andtoggle">${andFlt.on?"● AKTİF":"○ PASİF"}</button>
-    </div>
-    <div class="f">AND koşulları · ${andFlt.conditions.length} koşul</div>
-    <p class="mute">Her satır ayrı bir koşuldur. 2., 3. ve daha fazla koşul ekleyebilirsin. Bildirim/sonuç için hepsinin aynı anda doğru olması gerekir.</p>
-    ${andFlt.conditions.map((c,j)=>`<div class="f">${j+1}. koşul</div>${condRow(c,`data-ac="${j}"`,`data-adel="${j}"`,FG)}`).join("")}
-    <div class="row"><button class="ghost" id="andaddc">＋ ${andFlt.conditions.length+1}. koşul ekle</button><button class="x" id="andclear">Temizle</button></div>
-    <div class="row"><span class="mute">Yalnızca son alınan maç ve istatistik verisi kullanılır.</span><button class="go" id="andapply">Uygula</button></div>`;
-}
-
-async function loadFilter(){
-  if(!(flt.on||andFlt.on)||!active)return;
-  const conds=[...(flt.on?flt.conditions:[]),...(andFlt.on?andFlt.conditions:[])].filter(c=>!Number.isNaN(c.value));
-  try{
-    const r=await fetch("/api/filter",{method:"POST",headers:H(),body:JSON.stringify({conditions:conds,sort:flt.on&&flt.sort.metric?flt.sort:null})});
-    fres=r.ok?await r.json():{error:"Filtre çalışmadı"};
-  }catch{fres={error:"Bağlantı hatası"}}
-  if(tab==="m")renderMatches();
-}
-
-// ---- Kurallar ----
-const target=r=>r.matchId?esc(r.matchLabel||("Maç "+r.matchId)):"Tüm maçlar";
-const winT=r=>(r.minFrom!=null||r.minTo!=null)?` · ${r.minFrom??""}–${r.minTo??""}'`:"";
-const sumText=r=>r.conditions.length?r.conditions.map(c=>`${LBL[c.metric]||c.metric}${perT(c)} ${opT(c.op)} ${c.value}`).join(" ve "):"koşul yok";
-
-function body(r,i){
-  const missing=r.matchId&&!matches.some(m=>same(m.id,r.matchId));
-  const opts=`<option value="">Tüm maçlar</option>`
-    +(missing?`<option value="${esc(r.matchId)}" selected>${esc(r.matchLabel||r.matchId)} (listede yok)</option>`:"")
-    +matches.map(m=>`<option value="${esc(m.id)}" ${r.matchId&&same(m.id,r.matchId)?"selected":""}>${esc(m.home)} – ${esc(m.away)}${isLive(m)?` (${esc(m.minute)}')`:""}</option>`).join("");
-  return `<div class="rb">
-    <label class="f">Kural adı<input type="text" value="${esc(r.name)}" data-r="${i}" data-f="name"></label>
-    <label class="f">Çalışacağı maç<select data-r="${i}" data-f="target">${opts}</select></label>
-    <div class="f">Kuralın çalışacağı dakika aralığı (boşsa tüm maç)</div>
-    <div class="mm"><input type="number" inputmode="numeric" placeholder="başlangıç" value="${esc(r.minFrom)}" data-r="${i}" data-f="minFrom"><span>–</span><input type="number" inputmode="numeric" placeholder="bitiş" value="${esc(r.minTo)}" data-r="${i}" data-f="minTo"></div>
-    <div class="f">Koşullar (hepsi doğru olunca bildirim gider). Gol, şut, xG ve kart koşullarına zaman eklenebilir.</div>
-    ${r.conditions.map((c,j)=>condRow(c,`data-r="${i}" data-j="${j}"`,`data-del="${i}.${j}"`,GROUPS)).join("")}
-    <div class="row"><button class="ghost" data-addc="${i}">＋ Koşul</button><button class="x" data-delr="${i}">${r.draft?"Vazgeç":"Kuralı sil"}</button></div>
-    <div class="row"><span class="mute">${r.draft?"Kaydedilene kadar çalışmaz.":""}</span><button class="go" data-save="${esc(r.id)}">${r.draft?"Kaydet ve başlat":"Kaydet"}</button></div>
-  </div>`;
-}
-
-function renderRules(){
-  const L=rules.map((r,i)=>{
-    const o=open===r.id;
-    return `<div class="r ${r.enabled?"":"off"} ${r.draft?"dr":""}">
-      <div class="rh">
-        ${r.draft?'<span class="bd">TASLAK</span>':`<label class="sw"><input type="checkbox" data-en="${i}" ${r.enabled?"checked":""} aria-label="Kural açık"><span></span></label>`}
-        <div class="t" data-open="${esc(r.id)}"><div class="n">${esc(r.name)||"İsimsiz"}</div><div class="s">${r.matchId?"⚽ ":""}${target(r)}${winT(r)} · ${esc(sumText(r))}</div></div>
-        <button class="chev" data-open="${esc(r.id)}" aria-label="Aç/kapat">${o?"▾":"▸"}</button>
-      </div>${o?body(r,i):""}</div>`}).join("");
-  $("pr").innerHTML=`<button class="ghost" data-newall>＋ Tüm maçlar için kural</button>`+(L||`<p class="empty">Kural yok. Maçlar sekmesinden bir maç seç ya da yukarıdan ekle.</p>`);
-}
-
-function scoreText(s){return s&&s.home!=null&&s.away!=null?`${s.home} – ${s.away}`:"Bekleniyor"}
-function groupedNotifs(items){
-  const map=new Map();
-  for(const n of items||[]){const k=String(n.fixtureId);if(!map.has(k))map.set(k,{id:k,home:n.home,away:n.away,league:n.league,country:n.country,items:[]});map.get(k).items.push(n)}
-  return [...map.values()].sort((a,b)=>Math.max(...b.items.map(x=>x.sentAt))-Math.max(...a.items.map(x=>x.sentAt)));
-}
-function renderDashboard(){
-  if(!dashData){$("dashList").innerHTML='<p class="empty">Bildirim geçmişi yükleniyor...</p>';return}
-  const c=dashData.counts||{};
-  const cards=[
-    ["all","Gönderilen bildirim",c.notifications||0,"Bildirim kayıtları"],
-    ["matches","Bildirimli maç",c.matches||0,"Tekil maç sayısı"],
-    ["finished","Tamamlanan maç",c.finished||0,"Nihai skoru gelen"],
-    ["pending","Sonucu beklenen",c.pending||0,"Henüz tamamlanmayan"],
-  ];
-  $("dashCards").innerHTML=cards.map(x=>`<button class="dash-card ${dashFilter===x[0]?"on":""}" data-dfilter="${x[0]}"><small>${x[1]}</small><strong>${x[2]}</strong><em>${x[3]}</em></button>`).join("");
-  const source=dashFilter==="finished"?(dashData.allItems||[]).filter(n=>n.finalScore):dashFilter==="pending"?(dashData.allItems||[]).filter(n=>!n.finalScore):(dashData.allItems||[]);
-  const groups=groupedNotifs(source);
-  $("dashTitle").textContent=dashFilter==="finished"?"Tamamlanan maçlar":dashFilter==="pending"?"Sonucu beklenen maçlar":dashFilter==="matches"?"Bildirim gönderilen maçlar":"Bildirim gönderilen maçlar";
-  if(!groups.length){$("dashList").innerHTML='<p class="empty">Bu tarih ve seçime ait bildirim bulunmuyor.</p>';return}
-  $("dashList").innerHTML=groups.map(g=>{
-    const opened=dashOpen===g.id;
-    const latest=[...g.items].sort((a,b)=>b.sentAt-a.sentAt)[0];
-    const final=latest.finalScore;
-    return `<div class="dash-match"><button data-dmatch="${esc(g.id)}"><div><div class="dm-teams">${esc(g.home)} – ${esc(g.away)}</div><div class="dm-meta">${esc(g.country)} · ${esc(g.league)} · ${g.items.length} bildirim</div></div><div class="dm-score">${final?scoreText(final):scoreText(latest.scoreAt)} ${final?'<span style="color:var(--ok);font-size:10px">MS</span>':'<span style="color:var(--muted);font-size:10px">BEKLİYOR</span>'}</div></button>
-    ${opened?`<div class="dash-notifs">${g.items.slice().sort((a,b)=>a.sentAt-b.sentAt).map(n=>`<div class="dash-notif"><div><div class="dn-rule">${esc(n.ruleName)}</div><div class="dn-time">${new Date(n.sentAt).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} · ${n.minute}'</div></div><div><div class="dn-score">Bildirim: ${scoreText(n.scoreAt)}</div><div class="dn-final">${n.finalScore?`Maç sonu: ${scoreText(n.finalScore)}`:"Maç sonu: bekleniyor"}</div></div><div class="dn-sub">${n.finalStatus?`Durum: ${esc(n.finalStatus)}`:"Maç henüz tamamlanmadı"}</div></div>`).join("")}</div>`:""}</div>`;
-  }).join("");
-}
-async function loadDashboard(){
-  if(tab!=="d")return;
-  try{
-    const date=$("ddate").value;
-    const r=await fetch(`/api/notifications?date=${encodeURIComponent(date||"")}`,{headers:H()});
-    if(!r.ok)throw new Error("Bildirim geçmişi alınamadı");
-    dashData=await r.json();
-    const all=dashData.allItems||[];
-    if(dashFilter==="matches")dashData.allItems=all;
-    renderDashboard();
-  }catch(e){$("dashList").innerHTML=`<p class="empty">${esc(e.message)}</p>`}
-}
-
-function render(){
-  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===tab));
-  $("pm").hidden=tab!=="m";$("pr").hidden=tab!=="r";$("pd").hidden=tab!=="d";
-  if(tab==="m"){renderFilter();renderAndFilter();renderMatches()}
-  else if(tab==="r")renderRules();
-  else {renderDashboard();loadDashboard()}
-  status();
-}
-
-function addRule(m){
+   function addRule(m){
   const lbl=m?`${m.home} – ${m.away}`:"";
   const r={id:uid(),name:m?lbl:"Yeni kural",enabled:true,draft:true,matchId:m?String(m.id):null,matchLabel:lbl,minFrom:null,minTo:null,conditions:[newCond()]};
   rules.unshift(r);open=r.id;tab="r";render();window.scrollTo(0,0);
@@ -563,6 +440,7 @@ async function loadMatches(){
   }catch{err="Bağlantı hatası"}
   status();
   if(tab==="m")renderMatches();
+  if(tab==="g")renderGoalAnalysis();
   if(openM&&active)loadDetail(openM);
   if((flt.on||andFlt.on)&&active)loadFilter();
   if(tab==="d")loadDashboard();

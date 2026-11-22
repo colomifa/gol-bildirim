@@ -1,4 +1,3 @@
-
 import express from "express";
 import fs from "fs";
 import path from "path";
@@ -248,6 +247,75 @@ function last10Rows(x, m) {
     });
   }
   return rows;
+  // ---------- Canlı gol baskısı analizi ----------
+// Bu skor olasılık yüzdesi değildir; yakın dönem hücum göstergelerinden üretilen 0-100 baskı puanıdır.
+const GOAL_METRICS = [
+  { key: "xg", names: ["expected_goals", "xg", "Expected Goals"], max: 0.75, weight: 24, label: "xG artışı" },
+  { key: "sot", names: ["Shots on Goal", "Shots on Target"], max: 4, weight: 20, label: "İsabetli şut" },
+  { key: "inside", names: ["Shots insidebox", "Shots Inside Box"], max: 5, weight: 18, label: "Ceza sahası içi şut" },
+  { key: "shots", names: ["Total Shots", "Total shots"], max: 8, weight: 14, label: "Toplam şut" },
+  { key: "corners", names: ["Corner Kicks", "Corners"], max: 4, weight: 9, label: "Korner" },
+  { key: "blocked", names: ["Blocked Shots"], max: 3, weight: 5, label: "Engellenen şut" },
+  { key: "saves", names: ["Goalkeeper Saves", "Saves"], max: 3, weight: 4, label: "Kaleci kurtarışı" },
+  { key: "off", names: ["Shots off Goal", "Shots Off Goal"], max: 4, weight: 4, label: "İsabetsiz şut" },
+  { key: "offsides", names: ["Offsides"], max: 3, weight: 2, label: "Ofsayt" },
+];
+const statValue = (rows, names) => {
+  for (const name of names) {
+    const row = (rows || []).find((v) => String(v.type).toLowerCase() === name.toLowerCase());
+    if (row) return numv(row.value);
+  }
+  return null;
+};
+function goalWindowStats(x, m, minutes) {
+  const current = x.stats?.lists?.all || {};
+  if (!current.home && !current.away) return { ready: false, reason: "İstatistik bekleniyor", metrics: {} };
+  const target = Math.max(0, Number(m.minute || 0) - minutes);
+  const baseline = target <= 0 ? null : histEntryAt(x.hist, target);
+  // Sunucu maçı ortasında açıldıysa, yeterli geçmiş birikmeden sahte sıfır üretme.
+  if (target > 0 && (!baseline || baseline.minute < target - 2)) {
+    return { ready: false, reason: `${minutes} dakikalık geçmiş birikiyor`, metrics: {} };
+  }
+  const before = baseline?.rows || { home: [], away: [] };
+  const metrics = {};
+  for (const metric of GOAL_METRICS) {
+    const nowH = statValue(current.home, metric.names);
+    const nowA = statValue(current.away, metric.names);
+    const oldH = baseline ? statValue(before.home, metric.names) : 0;
+    const oldA = baseline ? statValue(before.away, metric.names) : 0;
+    const h = nowH == null || oldH == null ? null : Math.max(0, +(nowH - oldH).toFixed(3));
+    const a = nowA == null || oldA == null ? null : Math.max(0, +(nowA - oldA).toFixed(3));
+    const total = h == null && a == null ? null : (h || 0) + (a || 0);
+    metrics[metric.key] = { home: h, away: a, total, label: metric.label };
+  }
+  return { ready: true, fromMinute: target, toMinute: Number(m.minute || 0), metrics };
+}
+function scoreGoalWindow(window) {
+  if (!window.ready) return { ready: false, score: null, level: "Veri birikiyor", coverage: 0, metrics: window.metrics || {}, reason: window.reason };
+  let score = 0, coverage = 0, available = 0;
+  const contributions = [];
+  for (const metric of GOAL_METRICS) {
+    const value = window.metrics[metric.key]?.total;
+    if (value == null || !Number.isFinite(value)) continue;
+    available++;
+    coverage += metric.weight;
+    const points = Math.min(1, Math.max(0, value / metric.max)) * metric.weight;
+    score += points;
+    if (points >= 1) contributions.push({ label: metric.label, value: +value.toFixed(2), points: Math.round(points) });
+  }
+  // Çok az veri olan maçta puanın aşırı iddialı görünmesini engelle.
+  let finalScore = Math.round(score);
+  if (available < 2) finalScore = Math.min(finalScore, 35);
+  else if (available < 3) finalScore = Math.min(finalScore, 50);
+  const level = finalScore >= 70 ? "Çok yüksek baskı" : finalScore >= 55 ? "Yüksek baskı" : finalScore >= 35 ? "Orta baskı" : "Düşük baskı";
+  const coverageLabel = coverage >= 75 ? "Geniş" : coverage >= 50 ? "Orta" : "Sınırlı";
+  return { ready: true, score: finalScore, level, coverage, coverageLabel, available, metrics: window.metrics, contributions: contributions.sort((a,b) => b.points-a.points).slice(0,3) };
+}
+function analyzeGoalWindows(x, m) {
+  if (!x.stats || !RUNNING.has(m.short)) return { ready: false, status: "Canlı istatistik bekleniyor", w10: null, w15: null };
+  const w10 = scoreGoalWindow(goalWindowStats(x, m, 10));
+  const w15 = scoreGoalWindow(goalWindowStats(x, m, 15));
+  return { ready: w10.ready || w15.ready, status: "Canlı analiz", w10, w15, updated: x.statsAt || null };
 }
 
 function rangeBlock(hist, curMin, cur, a, b) {
@@ -408,7 +476,7 @@ async function poll() {
         for (const { m, x } of batch) {
           const fixture = byFixture.get(Number(m.id));
           if (!fixture) continue;
-          x.stats = parseStats(fixture.statistics || [], m);
+                    x.stats = parseStats(fixture.statistics || [], m);
           // Toplu fixture yanıtı olayları da içeriyorsa, gol koşulları için sakla.
           if (Array.isArray(fixture.events)) {
             x.events = fixture.events;
@@ -503,6 +571,11 @@ async function poll() {
       await safe(updateFinalScores);
     }
 
+    // Her canlı maç için son 10 ve 15 dakikalık gol baskısı puanlarını üret.
+    for (const m of playing) {
+      const x = extra.get(m.id) || {};
+      m.goalAnalysis = analyzeGoalWindows(x, m);
+    }
     cache = { matches: all, updated: now, error: warns[0] || "" };
     const log = `[poll] fikstür=${schedule.length} canlı=${liveMap.size} istatistik_maç=${statCandidates.length} istatistik_toplu_istek=${statsBatchCount} xG_verisi_yok=${xgBlocked} bildirim=${notifications.length} kalan_istek=${quota ?? "?"}`;
     if (log !== lastLog) { console.log(log); lastLog = log; }
@@ -559,7 +632,7 @@ app.post("/api/state", auth, (req, res) => {
 
 app.get("/api/matches", auth, (req, res) => {
   res.json({
-    matches: cache.matches.map(({ id, home, away, minute, status, homeGoals, awayGoals, country, league, short, kickoff }) => ({ id, home, away, minute, status, homeGoals, awayGoals, country, league, short, kickoff })),
+    matches: cache.matches.map(({ id, home, away, minute, status, homeGoals, awayGoals, country, league, short, kickoff, goalAnalysis }) => ({ id, home, away, minute, status, homeGoals, awayGoals, country, league, short, kickoff, goalAnalysis: goalAnalysis || null })),
     updated: cache.updated,
     error: cache.error,
     active,

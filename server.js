@@ -247,7 +247,9 @@ function last10Rows(x, m) {
     });
   }
   return rows;
-  // ---------- Canlı gol baskısı analizi ----------
+}
+
+// ---------- Canlı gol baskısı analizi ----------
 // Bu skor olasılık yüzdesi değildir; yakın dönem hücum göstergelerinden üretilen 0-100 baskı puanıdır.
 const GOAL_METRICS = [
   { key: "xg", names: ["expected_goals", "xg", "Expected Goals"], max: 0.75, weight: 24, label: "xG artışı" },
@@ -476,7 +478,7 @@ async function poll() {
         for (const { m, x } of batch) {
           const fixture = byFixture.get(Number(m.id));
           if (!fixture) continue;
-                    x.stats = parseStats(fixture.statistics || [], m);
+          x.stats = parseStats(fixture.statistics || [], m);
           // Toplu fixture yanıtı olayları da içeriyorsa, gol koşulları için sakla.
           if (Array.isArray(fixture.events)) {
             x.events = fixture.events;

@@ -318,7 +318,167 @@ function renderMatches(){
   if(filtering){
     const R=fres;
     if(!R){$("list").innerHTML='<p class="empty">Filtre uygulanıyor...</p>';return}
-   function addRule(m){
+    if(R.error){$("list").innerHTML=`<p class="empty">${esc(R.error)}</p>`;return}
+    if(R.passive){$("list").innerHTML='<p class="empty">Pasif: filtre çalışmıyor.</p>';return}
+    const v=x=>x==null?"–":(Math.round(x*100)/100);
+    const head=`<p class="mute">Canlı ${R.total} maç · ${R.rows.length} eşleşti${R.pending?` · ${R.pending} maç için veri bekleniyor`:""}</p>`;
+    $("list").innerHTML=head+(R.rows.length?R.rows.map(m=>rowHtml(m,`<div class="xl">xG ${v(m.xg?.home)}–${v(m.xg?.away)} · şut ${v(m.shots?.home)}–${v(m.shots?.away)}${flt.on&&flt.sort.metric?` · <b>${v(m.value)}</b>`:""}</div>`)).join(""):`<p class="empty">Bu filtreye uyan canlı maç yok.</p>`);
+    return;
+  }
+  const q=$("q").value.trim().toLowerCase();
+  const L=matches.filter(m=>!q||(m.home+" "+m.away).toLowerCase().includes(q)).sort((a,b)=>isLive(b)-isLive(a));
+  $("list").innerHTML=L.length?L.map(m=>rowHtml(m)).join(""):`<p class="empty">${matches.length?"Eşleşen maç yok.":"Maç verisi yok. Skor API'si bağlı mı?"}</p>`;
+}
+
+// ---- Canlı filtre ----
+function renderFilter(){
+  $("fbtn").textContent=(flt.on?"● ":"")+"Canlı filtre"+(flt.on?" (açık)":"");
+  $("fpanel").hidden=!fopen;
+  if(!fopen)return;
+  const s=flt.sort;
+  $("fpanel").innerHTML=`
+    <div class="f" style="margin-top:0">Sırala (en yüksek üstte)</div>
+    <div class="c one"><select data-fs="1" data-f="metric">${SORTM.map(o=>`<option value="${o[0]}" ${s.metric===o[0]?"selected":""}>${o[1]}</option>`).join("")}</select>${s.metric?perHtml(s,'data-fs="1"'):""}</div>
+    <div class="f">Filtreler (hepsi birlikte uygulanır)</div>
+    ${flt.conditions.map((c,j)=>condRow(c,`data-fc="${j}"`,`data-fdel="${j}"`,FG)).join("")||'<p class="mute">Koşul yok: tüm canlı maçlar listelenir.</p>'}
+    <div class="row"><button class="ghost" id="faddc">＋ Koşul</button><button class="x" id="fclear">Temizle</button></div>
+    <div class="row"><span class="mute">Filtre mevcut önbellekteki veriyi kullanır; yeni API sorgusu başlatmaz.</span><button class="go" id="fapply">Uygula</button></div>`;
+}
+function renderAndFilter(){
+  $("andbtn").textContent=(andFlt.on?"● ":"＋ ")+"Yeni AND filtresi"+(andFlt.on?" (açık)":"");
+  $("andpanel").hidden=!andOpen;
+  if(!andOpen)return;
+  $("andpanel").innerHTML=`
+    <div class="row" style="margin-top:0;margin-bottom:12px">
+      <div><div class="f" style="margin:0">AND filtresi</div><span class="mute">Filtreyi açıp kapatabilirsin.</span></div>
+      <button class="${andFlt.on?"go":"ghost"}" id="andtoggle">${andFlt.on?"● AKTİF":"○ PASİF"}</button>
+    </div>
+    <div class="f">AND koşulları · ${andFlt.conditions.length} koşul</div>
+    <p class="mute">Her satır ayrı bir koşuldur. 2., 3. ve daha fazla koşul ekleyebilirsin. Bildirim/sonuç için hepsinin aynı anda doğru olması gerekir.</p>
+    ${andFlt.conditions.map((c,j)=>`<div class="f">${j+1}. koşul</div>${condRow(c,`data-ac="${j}"`,`data-adel="${j}"`,FG)}`).join("")}
+    <div class="row"><button class="ghost" id="andaddc">＋ ${andFlt.conditions.length+1}. koşul ekle</button><button class="x" id="andclear">Temizle</button></div>
+    <div class="row"><span class="mute">Yalnızca son alınan maç ve istatistik verisi kullanılır.</span><button class="go" id="andapply">Uygula</button></div>`;
+}
+
+async function loadFilter(){
+  if(!(flt.on||andFlt.on)||!active)return;
+  const conds=[...(flt.on?flt.conditions:[]),...(andFlt.on?andFlt.conditions:[])].filter(c=>!Number.isNaN(c.value));
+  try{
+    const r=await fetch("/api/filter",{method:"POST",headers:H(),body:JSON.stringify({conditions:conds,sort:flt.on&&flt.sort.metric?flt.sort:null})});
+    fres=r.ok?await r.json():{error:"Filtre çalışmadı"};
+  }catch{fres={error:"Bağlantı hatası"}}
+  if(tab==="m")renderMatches();
+}
+
+// ---- Kurallar ----
+const target=r=>r.matchId?esc(r.matchLabel||("Maç "+r.matchId)):"Tüm maçlar";
+const winT=r=>(r.minFrom!=null||r.minTo!=null)?` · ${r.minFrom??""}–${r.minTo??""}'`:"";
+const sumText=r=>r.conditions.length?r.conditions.map(c=>`${LBL[c.metric]||c.metric}${perT(c)} ${opT(c.op)} ${c.value}`).join(" ve "):"koşul yok";
+
+function body(r,i){
+  const missing=r.matchId&&!matches.some(m=>same(m.id,r.matchId));
+  const opts=`<option value="">Tüm maçlar</option>`
+    +(missing?`<option value="${esc(r.matchId)}" selected>${esc(r.matchLabel||r.matchId)} (listede yok)</option>`:"")
+    +matches.map(m=>`<option value="${esc(m.id)}" ${r.matchId&&same(m.id,r.matchId)?"selected":""}>${esc(m.home)} – ${esc(m.away)}${isLive(m)?` (${esc(m.minute)}')`:""}</option>`).join("");
+  return `<div class="rb">
+    <label class="f">Kural adı<input type="text" value="${esc(r.name)}" data-r="${i}" data-f="name"></label>
+    <label class="f">Çalışacağı maç<select data-r="${i}" data-f="target">${opts}</select></label>
+    <div class="f">Kuralın çalışacağı dakika aralığı (boşsa tüm maç)</div>
+    <div class="mm"><input type="number" inputmode="numeric" placeholder="başlangıç" value="${esc(r.minFrom)}" data-r="${i}" data-f="minFrom"><span>–</span><input type="number" inputmode="numeric" placeholder="bitiş" value="${esc(r.minTo)}" data-r="${i}" data-f="minTo"></div>
+    <div class="f">Koşullar (hepsi doğru olunca bildirim gider). Gol, şut, xG ve kart koşullarına zaman eklenebilir.</div>
+    ${r.conditions.map((c,j)=>condRow(c,`data-r="${i}" data-j="${j}"`,`data-del="${i}.${j}"`,GROUPS)).join("")}
+    <div class="row"><button class="ghost" data-addc="${i}">＋ Koşul</button><button class="x" data-delr="${i}">${r.draft?"Vazgeç":"Kuralı sil"}</button></div>
+    <div class="row"><span class="mute">${r.draft?"Kaydedilene kadar çalışmaz.":""}</span><button class="go" data-save="${esc(r.id)}">${r.draft?"Kaydet ve başlat":"Kaydet"}</button></div>
+  </div>`;
+}
+
+function renderRules(){
+  const L=rules.map((r,i)=>{
+    const o=open===r.id;
+    return `<div class="r ${r.enabled?"":"off"} ${r.draft?"dr":""}">
+      <div class="rh">
+        ${r.draft?'<span class="bd">TASLAK</span>':`<label class="sw"><input type="checkbox" data-en="${i}" ${r.enabled?"checked":""} aria-label="Kural açık"><span></span></label>`}
+        <div class="t" data-open="${esc(r.id)}"><div class="n">${esc(r.name)||"İsimsiz"}</div><div class="s">${r.matchId?"⚽ ":""}${target(r)}${winT(r)} · ${esc(sumText(r))}</div></div>
+        <button class="chev" data-open="${esc(r.id)}" aria-label="Aç/kapat">${o?"▾":"▸"}</button>
+      </div>${o?body(r,i):""}</div>`}).join("");
+  $("pr").innerHTML=`<button class="ghost" data-newall>＋ Tüm maçlar için kural</button>`+(L||`<p class="empty">Kural yok. Maçlar sekmesinden bir maç seç ya da yukarıdan ekle.</p>`);
+}
+
+function scoreText(s){return s&&s.home!=null&&s.away!=null?`${s.home} – ${s.away}`:"Bekleniyor"}
+function groupedNotifs(items){
+  const map=new Map();
+  for(const n of items||[]){const k=String(n.fixtureId);if(!map.has(k))map.set(k,{id:k,home:n.home,away:n.away,league:n.league,country:n.country,items:[]});map.get(k).items.push(n)}
+  return [...map.values()].sort((a,b)=>Math.max(...b.items.map(x=>x.sentAt))-Math.max(...a.items.map(x=>x.sentAt)));
+}
+function renderDashboard(){
+  if(!dashData){$("dashList").innerHTML='<p class="empty">Bildirim geçmişi yükleniyor...</p>';return}
+  const c=dashData.counts||{};
+  const cards=[
+    ["all","Gönderilen bildirim",c.notifications||0,"Bildirim kayıtları"],
+    ["matches","Bildirimli maç",c.matches||0,"Tekil maç sayısı"],
+    ["finished","Tamamlanan maç",c.finished||0,"Nihai skoru gelen"],
+    ["pending","Sonucu beklenen",c.pending||0,"Henüz tamamlanmayan"],
+  ];
+  $("dashCards").innerHTML=cards.map(x=>`<button class="dash-card ${dashFilter===x[0]?"on":""}" data-dfilter="${x[0]}"><small>${x[1]}</small><strong>${x[2]}</strong><em>${x[3]}</em></button>`).join("");
+  const source=dashFilter==="finished"?(dashData.allItems||[]).filter(n=>n.finalScore):dashFilter==="pending"?(dashData.allItems||[]).filter(n=>!n.finalScore):(dashData.allItems||[]);
+  const groups=groupedNotifs(source);
+  $("dashTitle").textContent=dashFilter==="finished"?"Tamamlanan maçlar":dashFilter==="pending"?"Sonucu beklenen maçlar":dashFilter==="matches"?"Bildirim gönderilen maçlar":"Bildirim gönderilen maçlar";
+  if(!groups.length){$("dashList").innerHTML='<p class="empty">Bu tarih ve seçime ait bildirim bulunmuyor.</p>';return}
+  $("dashList").innerHTML=groups.map(g=>{
+    const opened=dashOpen===g.id;
+    const latest=[...g.items].sort((a,b)=>b.sentAt-a.sentAt)[0];
+    const final=latest.finalScore;
+    return `<div class="dash-match"><button data-dmatch="${esc(g.id)}"><div><div class="dm-teams">${esc(g.home)} – ${esc(g.away)}</div><div class="dm-meta">${esc(g.country)} · ${esc(g.league)} · ${g.items.length} bildirim</div></div><div class="dm-score">${final?scoreText(final):scoreText(latest.scoreAt)} ${final?'<span style="color:var(--ok);font-size:10px">MS</span>':'<span style="color:var(--muted);font-size:10px">BEKLİYOR</span>'}</div></button>
+    ${opened?`<div class="dash-notifs">${g.items.slice().sort((a,b)=>a.sentAt-b.sentAt).map(n=>`<div class="dash-notif"><div><div class="dn-rule">${esc(n.ruleName)}</div><div class="dn-time">${new Date(n.sentAt).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} · ${n.minute}'</div></div><div><div class="dn-score">Bildirim: ${scoreText(n.scoreAt)}</div><div class="dn-final">${n.finalScore?`Maç sonu: ${scoreText(n.finalScore)}`:"Maç sonu: bekleniyor"}</div></div><div class="dn-sub">${n.finalStatus?`Durum: ${esc(n.finalStatus)}`:"Maç henüz tamamlanmadı"}</div></div>`).join("")}</div>`:""}</div>`;
+  }).join("");
+}
+async function loadDashboard(){
+  if(tab!=="d")return;
+  try{
+    const date=$("ddate").value;
+    const r=await fetch(`/api/notifications?date=${encodeURIComponent(date||"")}`,{headers:H()});
+    if(!r.ok)throw new Error("Bildirim geçmişi alınamadı");
+    dashData=await r.json();
+    const all=dashData.allItems||[];
+    if(dashFilter==="matches")dashData.allItems=all;
+    renderDashboard();
+  }catch(e){$("dashList").innerHTML=`<p class="empty">${esc(e.message)}</p>`}
+}
+
+function gaWindowHtml(label,w){
+  if(!w||!w.ready)return `<div class="ga-window"><small>${label}</small><b>–</b><em>${esc(w?.reason||"İstatistik bekleniyor")}</em></div>`;
+  const s=Number(w.score)||0;
+  return `<div class="ga-window"><small>${label}</small><b>${s}/100</b><em>${esc(w.level)} · ${esc(w.coverageLabel||"Sınırlı")} veri</em><div class="ga-track"><i style="width:${Math.max(0,Math.min(100,s))}%"></i></div></div>`;
+}
+function renderGoalAnalysis(){
+  const live=matches.filter(m=>isLive(m));
+  const scored=live.filter(m=>m.goalAnalysis?.w10?.ready||m.goalAnalysis?.w15?.ready)
+    .sort((a,b)=>Math.max(b.goalAnalysis?.w10?.score||0,b.goalAnalysis?.w15?.score||0)-Math.max(a.goalAnalysis?.w10?.score||0,a.goalAnalysis?.w15?.score||0));
+  const ready10=scored.filter(m=>m.goalAnalysis?.w10?.ready).length;
+  const ready15=scored.filter(m=>m.goalAnalysis?.w15?.ready).length;
+  const high=scored.filter(m=>Math.max(m.goalAnalysis?.w10?.score||0,m.goalAnalysis?.w15?.score||0)>=55).length;
+  const summary=`<div class="ga-summary"><div class="ga-stat"><small>Canlı maç</small><b>${live.length}</b></div><div class="ga-stat"><small>10 dk analizi hazır</small><b>${ready10}</b></div><div class="ga-stat"><small>15 dk analizi hazır</small><b>${ready15}</b></div><div class="ga-stat"><small>Yüksek baskı</small><b>${high}</b></div></div>`;
+  const cards=scored.map(m=>{
+    const a=m.goalAnalysis||{},w10=a.w10,w15=a.w15;
+    const best=Math.max(w10?.score||0,w15?.score||0);
+    const metricRows=(w)=>Object.entries(w?.metrics||{}).filter(([,v])=>v&&v.total!=null).map(([k,v])=>`${esc(v.label)} ${Number(v.total).toFixed(2)}`).join(" · ");
+    return `<article class="ga-card"><div class="ga-top"><div><div class="ga-teams">${esc(m.home)} – ${esc(m.away)}</div><div class="ga-meta">${esc(m.country||"")} · ${esc(m.league||"")} · ${esc(m.minute)}' · Skor ${esc(m.homeGoals)}-${esc(m.awayGoals)}</div></div><span class="mono" style="color:var(--accent);font-weight:700">${best}/100</span></div><div class="ga-scores">${gaWindowHtml("Önümüzdeki 10 dk için baskı",w10)}${gaWindowHtml("Önümüzdeki 15 dk için baskı",w15)}</div><div class="ga-details">10 dk verisi: ${metricRows(w10)||"Henüz ölçülebilir veri yok"}<br>15 dk verisi: ${metricRows(w15)||"Henüz ölçülebilir veri yok"}</div></article>`;
+  }).join("");
+  const waiting=live.length-scored.length;
+  $("pg").innerHTML=summary+(cards||`<div class="ga-empty">Henüz yeterli canlı istatistik yok. Maçlar ilerledikçe son 10 ve 15 dakikalık veri birikecek.</div>`)+(waiting?`<p class="mute">${waiting} maçta analiz için yeterli geçmiş veri henüz birikmedi. Bu maçlar veri geldikçe otomatik eklenecek.</p>`:"");
+}
+
+function render(){
+  document.querySelectorAll("nav button").forEach(b=>b.classList.toggle("on",b.dataset.tab===tab));
+  $("pm").hidden=tab!=="m";$("pr").hidden=tab!=="r";$("pd").hidden=tab!=="d";$("pg").hidden=tab!=="g";
+  if(tab==="m"){renderFilter();renderAndFilter();renderMatches()}
+  else if(tab==="r")renderRules();
+  else if(tab==="g")renderGoalAnalysis();
+  else {renderDashboard();loadDashboard()}
+  status();
+}
+
+function addRule(m){
   const lbl=m?`${m.home} – ${m.away}`:"";
   const r={id:uid(),name:m?lbl:"Yeni kural",enabled:true,draft:true,matchId:m?String(m.id):null,matchLabel:lbl,minFrom:null,minTo:null,conditions:[newCond()]};
   rules.unshift(r);open=r.id;tab="r";render();window.scrollTo(0,0);

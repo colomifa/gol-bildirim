@@ -43,7 +43,7 @@ nav b{font:700 11px "IBM Plex Mono",monospace;background:var(--surface-3);border
 main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
 #pm,#pr,#pg{min-width:0}
 #pg:before{content:"CANLI GOL TAHMİN MERKEZİ";display:block;color:var(--accent);font:700 10px "IBM Plex Mono",monospace;letter-spacing:.16em;margin:0 0 8px}
-#pg:after{content:"Son 10 ve 15 dakikadaki hücum istatistiklerinden üretilen baskı puanları. Yüzde veya kesin olasılık değildir.";display:block;color:var(--muted);font-size:13px;margin:-2px 0 18px}
+#pg:after{content:"Maç önü oranları, lig sıralaması, iç saha/deplasman performansı ve canlı istatistikleri birlikte değerlendiren deneysel gol sinyali.";display:block;color:var(--muted);font-size:13px;margin:-2px 0 18px}
 .ga-summary{display:flex;gap:10px;flex-wrap:wrap;margin:0 0 14px}
 .ga-stat{background:var(--surface);border:1px solid var(--line);border-radius:12px;padding:11px 14px;min-width:110px}
 .ga-stat small{display:block;color:var(--muted);font-size:11px}.ga-stat b{display:block;font:700 21px "IBM Plex Mono",monospace;margin-top:3px}
@@ -52,6 +52,13 @@ main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
 .ga-scores{display:grid;grid-template-columns:1fr 1fr;gap:9px;margin-top:13px}.ga-window{background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:10px;padding:10px}.ga-window small{color:var(--muted);font-size:11px}.ga-window b{display:block;font:700 23px "IBM Plex Mono",monospace;margin:4px 0}.ga-window em{font-style:normal;font-size:11px;color:var(--muted)}
 .ga-track{height:6px;background:#25344a;border-radius:9px;overflow:hidden;margin-top:6px}.ga-track i{display:block;height:100%;background:var(--accent);border-radius:9px}
 .ga-details{color:var(--muted);font-size:11px;margin-top:10px;line-height:1.7}.ga-empty{padding:30px 18px;text-align:center;color:var(--muted);border:1px dashed var(--line);border-radius:14px}
+.ga-section-title{font-size:14px;font-weight:750;margin:22px 0 10px;color:var(--ink)}
+.ga-model-score{font:800 21px "IBM Plex Mono",monospace;color:var(--accent)}
+.ga-signal{display:inline-block;font-size:9px;font-weight:800;letter-spacing:.04em;color:#8ff0ad;background:rgba(112,230,161,.1);border:1px solid rgba(112,230,161,.3);border-radius:20px;padding:4px 7px;margin-top:5px}
+.ga-muted{display:inline-block;color:var(--muted);font-size:10px;margin-top:5px}
+.ga-prob{display:flex;align-items:baseline;gap:9px;flex-wrap:wrap;margin-top:12px;font-size:12px;color:var(--muted)}
+.ga-prob b{font:800 20px "IBM Plex Mono",monospace;color:var(--accent)}
+.ga-prob small{font-size:10px;color:var(--muted)}
 @media(max-width:700px){nav{gap:2px}nav button{padding:11px 9px;font-size:12px}.ga-scores{gap:7px}.ga-window{padding:8px}.ga-window b{font-size:20px}}
 #pm:before{content:"CANLI TAKİP MERKEZİ";display:block;color:var(--accent);font:700 10px "IBM Plex Mono",monospace;letter-spacing:.16em;margin:0 0 8px}
 #pm:after{content:"Maçları keşfet, istatistikleri incele ve tek dokunuşla bildirim kuralı oluştur.";display:block;color:var(--muted);font-size:13px;margin:-2px 0 22px}
@@ -452,20 +459,31 @@ function gaWindowHtml(label,w){
 }
 function renderGoalAnalysis(){
   const live=matches.filter(m=>isLive(m));
+  const predictions=live.filter(m=>m.goalPrediction?.ready)
+    .sort((a,b)=>(b.goalPrediction?.score||0)-(a.goalPrediction?.score||0));
+  const signals=predictions.filter(m=>m.goalPrediction?.signal).length;
+  const trained=predictions.filter(m=>m.goalPrediction?.probability!=null).length;
   const scored=live.filter(m=>m.goalAnalysis?.w10?.ready||m.goalAnalysis?.w15?.ready)
     .sort((a,b)=>Math.max(b.goalAnalysis?.w10?.score||0,b.goalAnalysis?.w15?.score||0)-Math.max(a.goalAnalysis?.w10?.score||0,a.goalAnalysis?.w15?.score||0));
   const ready10=scored.filter(m=>m.goalAnalysis?.w10?.ready).length;
   const ready15=scored.filter(m=>m.goalAnalysis?.w15?.ready).length;
-  const high=scored.filter(m=>Math.max(m.goalAnalysis?.w10?.score||0,m.goalAnalysis?.w15?.score||0)>=55).length;
-  const summary=`<div class="ga-summary"><div class="ga-stat"><small>Canlı maç</small><b>${live.length}</b></div><div class="ga-stat"><small>10 dk analizi hazır</small><b>${ready10}</b></div><div class="ga-stat"><small>15 dk analizi hazır</small><b>${ready15}</b></div><div class="ga-stat"><small>Yüksek baskı</small><b>${high}</b></div></div>`;
-  const cards=scored.map(m=>{
+  const summary=`<div class="ga-summary"><div class="ga-stat"><small>Canlı maç</small><b>${live.length}</b></div><div class="ga-stat"><small>Gol sinyali</small><b>${signals}</b></div><div class="ga-stat"><small>Model tahmini hazır</small><b>${predictions.length}</b></div><div class="ga-stat"><small>Eğitilmiş model</small><b>${trained}</b></div></div>`;
+  const modelCards=predictions.map(m=>{
+    const p=m.goalPrediction||{};
+    const comp=(p.components||[]).map(c=>`<span>${esc(c.label)}: <b>${c.value==null?"–":c.value+"/100"}</b></span>`).join(" · ");
+    const c=p.context||{},o=p.preOdds||{};
+    const status=p.signal?`<span class="ga-signal">GOL SİNYALİ · TELEGRAMA GÖNDERİLDİ</span>`:`<span class="ga-muted">${esc(p.level||"Analiz")}</span>`;
+    const probability=p.probability==null?`<div class="ga-prob">Deneysel puan <b>${p.score}/100</b><small>Kalibre edilmiş olasılık modeli için geçmiş veri birikiyor</small></div>`:`<div class="ga-prob">Önümüzdeki 10 dk deneysel tahmin <b>%${p.probability}</b><small>${esc(p.probabilityLabel||"")} · ${p.score}/100 model puanı</small></div>`;
+    return `<article class="ga-card"><div class="ga-top"><div><div class="ga-teams">${esc(m.home)} – ${esc(m.away)}</div><div class="ga-meta">${esc(m.country||"")} · ${esc(m.league||"")} · ${esc(m.minute)}' · Skor ${esc(m.homeGoals)}-${esc(m.awayGoals)}</div></div><div style="text-align:right"><b class="ga-model-score">${p.score}/100</b><div>${status}</div></div></div>${probability}<div class="ga-track"><i style="width:${Math.max(0,Math.min(100,p.score||0))}%"></i></div><div class="ga-details">${comp}<br>Maç önü 1-X-2: ${o.home??"–"} / ${o.draw??"–"} / ${o.away??"–"} · 2.5 Üst: ${o.over25??"–"} · 2.5 Alt: ${o.under25??"–"}<br>2.5 üst piyasa olasılığı: ${p.over25Probability==null?"veri yok":"%"+Math.round(p.over25Probability*100)} · Tahmini toplam gol: ${p.expectedGoals==null?"veri yok":p.expectedGoals}<br>Sıralama: ${c.homeRank??"–"}. / ${c.awayRank??"–"}. · Puan: ${c.homePoints??"–"} / ${c.awayPoints??"–"}<br>İç saha gol ort.: ${c.homeScored??"–"} · İç saha yenilen: ${c.homeConceded??"–"} · Deplasman gol ort.: ${c.awayScored??"–"} · Deplasman yenilen: ${c.awayConceded??"–"}<br>Form: ${esc(c.homeForm||"–")} / ${esc(c.awayForm||"–")} · Veri kapsamı: %${p.coverage??0} · Etiketlenmiş eğitim örneği: ${p.training?.labelledSamples??0}</div></article>`;
+  }).join("");
+  const pressureCards=scored.map(m=>{
     const a=m.goalAnalysis||{},w10=a.w10,w15=a.w15;
     const best=Math.max(w10?.score||0,w15?.score||0);
     const metricRows=(w)=>Object.entries(w?.metrics||{}).filter(([,v])=>v&&v.total!=null).map(([k,v])=>`${esc(v.label)} ${Number(v.total).toFixed(2)}`).join(" · ");
-    return `<article class="ga-card"><div class="ga-top"><div><div class="ga-teams">${esc(m.home)} – ${esc(m.away)}</div><div class="ga-meta">${esc(m.country||"")} · ${esc(m.league||"")} · ${esc(m.minute)}' · Skor ${esc(m.homeGoals)}-${esc(m.awayGoals)}</div></div><span class="mono" style="color:var(--accent);font-weight:700">${best}/100</span></div><div class="ga-scores">${gaWindowHtml("Önümüzdeki 10 dk için baskı",w10)}${gaWindowHtml("Önümüzdeki 15 dk için baskı",w15)}</div><div class="ga-details">10 dk verisi: ${metricRows(w10)||"Henüz ölçülebilir veri yok"}<br>15 dk verisi: ${metricRows(w15)||"Henüz ölçülebilir veri yok"}</div></article>`;
+    return `<article class="ga-card"><div class="ga-top"><div><div class="ga-teams">${esc(m.home)} – ${esc(m.away)}</div><div class="ga-meta">${esc(m.minute)}' · Skor ${esc(m.homeGoals)}-${esc(m.awayGoals)}</div></div><span class="mono" style="color:var(--accent);font-weight:700">${best}/100</span></div><div class="ga-scores">${gaWindowHtml("Son 10 dk baskısı",w10)}${gaWindowHtml("Son 15 dk baskısı",w15)}</div><div class="ga-details">10 dk verisi: ${metricRows(w10)||"Henüz ölçülebilir veri yok"}<br>15 dk verisi: ${metricRows(w15)||"Henüz ölçülebilir veri yok"}</div></article>`;
   }).join("");
-  const waiting=live.length-scored.length;
-  $("pg").innerHTML=summary+(cards||`<div class="ga-empty">Henüz yeterli canlı istatistik yok. Maçlar ilerledikçe son 10 ve 15 dakikalık veri birikecek.</div>`)+(waiting?`<p class="mute">${waiting} maçta analiz için yeterli geçmiş veri henüz birikmedi. Bu maçlar veri geldikçe otomatik eklenecek.</p>`:"");
+  const waiting=live.length-predictions.length;
+  $("pg").innerHTML=summary+`<h3 class="ga-section-title">Bütünleşik gol tahmini</h3>`+(modelCards||`<div class="ga-empty">Canlı maç bağlamı ve istatistikleri bekleniyor.</div>`)+(waiting?`<p class="mute">${waiting} maçta henüz yeterli analiz verisi bulunmuyor. Oran, puan durumu ve takım profilleri arka planda tamamlanıyor.</p>`:"")+`<h3 class="ga-section-title">Canlı hücum baskısı</h3>`+(pressureCards||`<div class="ga-empty">Son 10/15 dakika istatistikleri henüz birikmedi.</div>`);
 }
 
 function render(){

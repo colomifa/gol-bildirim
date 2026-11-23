@@ -2,6 +2,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { findTriggered, formatAlert, condsMatch, toMetrics, pkey } from "./rules.mjs";
+import { scoreGoalContext, trainingVector, trainLogistic, predictTrainedProbability } from "./goal-model.mjs";
 
 const env = process.env;
 const { BOT_TOKEN, CHAT_ID, PANEL_PASSWORD, API_KEY, DATA_DIR = ".", TIMEZONE = "Europe/Istanbul", BOOKMAKER_ID = "8" } = env;
@@ -19,10 +20,13 @@ if (!BOT_TOKEN || !CHAT_ID || !PANEL_PASSWORD) {
 }
 
 // ---------- Kayıtlar ----------
+fs.mkdirSync(DATA_DIR, { recursive: true });
 const RULES_FILE = path.join(DATA_DIR, "rules.json");
 const FIRED_FILE = path.join(DATA_DIR, "fired.json");
 const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const NOTIFICATIONS_FILE = path.join(DATA_DIR, "notifications.json");
+const PROFILES_FILE = path.join(DATA_DIR, "goal-profiles.json");
+const MODEL_FILE = path.join(DATA_DIR, "goal-model.json");
 const loadRules = () => { try { return JSON.parse(fs.readFileSync(RULES_FILE, "utf8")).rules || []; } catch { return []; } };
 const saveRules = (rules) => fs.writeFileSync(RULES_FILE, JSON.stringify({ rules }, null, 2));
 
@@ -43,6 +47,7 @@ let active = true; // pasifken API'ye hiç sorgu atılmaz
 try { active = JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")).active !== false; } catch {}
 
 // ---------- Telegram ----------
+const htmlSafe = (v) => String(v ?? "").replace(/[&<>]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" }[c]));
 async function sendTelegram(text) {
   const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`, {
     method: "POST",
@@ -103,7 +108,7 @@ function norm(f) {
   return {
     id: f.fixture.id, home: f.teams.home.name, away: f.teams.away.name,
     homeId: f.teams.home.id, awayId: f.teams.away.id,
-    country: f.league.country, league: f.league.name,
+    country: f.league.country, league: f.league.name, leagueId: f.league.id, season: f.league.season,
     minute: f.fixture.status.elapsed ?? 0, status: label, short: s, inPlay: IN_PLAY.has(s),
     homeGoals: f.goals.home, awayGoals: f.goals.away, kickoff: f.fixture.timestamp,
   };
@@ -382,6 +387,18 @@ const extra = new Map();
 let cache = { matches: [], updated: null, error: "" };
 let lastLog = "", polling = false;
 
+// Maç önü bağlamı: lig sıralaması ve takımın sezon iç saha/deplasman istatistikleri.
+let profileStore = { standings: {}, teams: {} };
+try { const p = JSON.parse(fs.readFileSync(PROFILES_FILE, "utf8")); profileStore = { standings: p.standings || {}, teams: p.teams || {} }; } catch {}
+const saveProfiles = () => { try { fs.writeFileSync(PROFILES_FILE, JSON.stringify(profileStore)); } catch (e) { console.error("Gol profilleri yazılamadı:", e.message); } };
+let modelStore = { samples: [], weights: null, trainedAt: null, trainedCount: 0, sentSignals: {}, newLabels: 0 };
+try { const p = JSON.parse(fs.readFileSync(MODEL_FILE, "utf8")); modelStore = { ...modelStore, ...p }; } catch {}
+if (!Array.isArray(modelStore.samples)) modelStore.samples = [];
+if (!modelStore.sentSignals || typeof modelStore.sentSignals !== "object") modelStore.sentSignals = {};
+const saveModel = () => { try { fs.writeFileSync(MODEL_FILE, JSON.stringify(modelStore)); } catch (e) { console.error("Gol modeli yazılamadı:", e.message); } };
+const PROFILE_STALE = 12 * 60 * 60 * 1000;
+const STANDINGS_STALE = 60 * 60 * 1000;
+
 function addNotification(m, rule, minute, sentAt) {
   notifications.push({
     id: `${m.id}-${sentAt}-${Math.random().toString(36).slice(2, 8)}`,
@@ -426,6 +443,73 @@ async function updateFinalScores() {
       }
   }
   if (changed) saveNotifications();
+}
+
+function flattenStandings(response) {
+  const groups = response?.[0]?.league?.standings || [];
+  return Array.isArray(groups) ? groups.flat().filter((r) => r?.team?.id) : [];
+}
+function profileContext(m, x) {
+  const key = `${m.leagueId}:${m.season}`;
+  return {
+    preOdds: x.pre || null,
+    standings: profileStore.standings[key]?.data || null,
+    homeStats: profileStore.teams[`${key}:${m.homeId}`]?.data || null,
+    awayStats: profileStore.teams[`${key}:${m.awayId}`]?.data || null,
+  };
+}
+function updateTraining(m, x, prediction, now) {
+  let changed = false;
+  const totalGoals = (Number(m.homeGoals) || 0) + (Number(m.awayGoals) || 0);
+  for (const sample of modelStore.samples) {
+    if (sample.y !== null || String(sample.fixtureId) !== String(m.id) || Number(m.minute) < sample.targetMinute) continue;
+    let scored = null;
+    if (Array.isArray(x.goals) && x.goals.length) {
+      scored = x.goals.some((g) => Number(g.minute) > sample.minute && Number(g.minute) <= sample.targetMinute) ? 1 : 0;
+    }
+    if (scored === null) scored = totalGoals > sample.scoreAt ? 1 : 0;
+    sample.y = scored;
+    sample.labelledAt = now;
+    changed = true;
+    modelStore.newLabels = (modelStore.newLabels || 0) + 1;
+  }
+  const previousSamples = modelStore.samples.filter((v) => String(v.fixtureId) === String(m.id));
+  const lastStoredMinute = previousSamples.length ? Math.max(...previousSamples.map((v) => Number(v.minute) || 0)) : -100;
+  const last = Math.max(Number(x.lastModelSampleMinute ?? -100), lastStoredMinute);
+  if (Number(m.minute) >= 5 && Number(m.minute) - last >= 10 && prediction?.ready && prediction.livePressure != null && prediction.coverage >= 60) {
+    modelStore.samples.push({
+      fixtureId: String(m.id), minute: Number(m.minute), targetMinute: Number(m.minute) + 10,
+      scoreAt: totalGoals, x: trainingVector(prediction), y: null, createdAt: now,
+    });
+    x.lastModelSampleMinute = Number(m.minute);
+    changed = true;
+  }
+  if (modelStore.samples.length > 30000) modelStore.samples = modelStore.samples.slice(-30000);
+  const labelledRows = modelStore.samples.filter((v) => v.y === 0 || v.y === 1);
+  const labelled = labelledRows.length;
+  const positives = labelledRows.filter((v) => v.y === 1).length;
+  const negatives = labelled - positives;
+  if (labelled >= 250 && positives >= 25 && negatives >= 50 && ((modelStore.newLabels || 0) >= 50 || !modelStore.weights)) {
+    const trained = trainLogistic(modelStore.samples, modelStore.weights);
+    if (trained) {
+      modelStore.weights = trained.weights;
+      modelStore.trainedAt = trained.trainedAt;
+      modelStore.trainedCount = trained.samples;
+      modelStore.newLabels = 0;
+      changed = true;
+    }
+  }
+  if (modelStore.weights) {
+    const probability = predictTrainedProbability(trainingVector(prediction), modelStore.weights);
+    prediction.probability = probability == null ? null : Math.round(probability * 100);
+    prediction.probabilityLabel = probability == null ? "Model henüz eğitilmedi" : "Geçmiş örneklerle eğitilmiş deneysel tahmin";
+  }
+  prediction.training = {
+    labelledSamples: modelStore.samples.filter((v) => v.y === 0 || v.y === 1).length,
+    pendingSamples: modelStore.samples.filter((v) => v.y === null).length,
+    trainedSamples: modelStore.trainedCount || 0,
+  };
+  if (changed) saveModel();
 }
 
 async function poll() {
@@ -502,6 +586,8 @@ async function poll() {
 
     // Gol dakikası gereken kurallar için olay verisi; yalnızca skor değiştiğinde.
     const otherTasks = [];
+    const profileTasks = [];
+    let profileBudget = 2;
     let preBudget = 1, eventBudget = 1;
     for (const m of all) {
       if (!m.inPlay) continue;
@@ -521,12 +607,48 @@ async function poll() {
         preBudget--; x.preAt = now;
         otherTasks.push(safe(async () => {
           const r = await api(`/odds?fixture=${m.id}&bookmaker=${BOOKMAKER_ID}`);
-          x.pre = oddsSet(r[0]?.bookmakers?.[0]?.bets, false);
+          const books = r[0]?.bookmakers || [];
+          const selected = books.find((b) => String(b.id) === String(BOOKMAKER_ID)) || books[0];
+          x.pre = oddsSet(selected?.bets, false);
         }));
+      }
+
+      // Her maç için maç önü oranı; aynı lig tablosu ve takım profilleri önbellekten paylaşılır.
+      if (profileBudget > 0 && x.preAt === undefined) {
+        profileBudget--; x.preAt = now;
+        profileTasks.push(safe(async () => {
+          const r = await api(`/odds?fixture=${m.id}`);
+          const books = r[0]?.bookmakers || [];
+          const selected = books.find((b) => String(b.id) === String(BOOKMAKER_ID)) || books[0];
+          x.pre = oddsSet(selected?.bets, false);
+        }));
+      }
+      const leagueKey = `${m.leagueId}:${m.season}`;
+      const standingEntry = profileStore.standings[leagueKey];
+      if (profileBudget > 0 && m.leagueId && m.season && (!standingEntry || now - standingEntry.fetchedAt > STANDINGS_STALE)) {
+        profileBudget--;
+        profileTasks.push(safe(async () => {
+          const r = await api(`/standings?league=${m.leagueId}&season=${m.season}`);
+          profileStore.standings[leagueKey] = { data: flattenStandings(r), fetchedAt: now };
+          saveProfiles();
+        }));
+      }
+      for (const teamId of [m.homeId, m.awayId]) {
+        const teamKey = `${leagueKey}:${teamId}`;
+        const teamEntry = profileStore.teams[teamKey];
+        if (profileBudget <= 0) break;
+        if (m.leagueId && m.season && teamId && (!teamEntry || now - teamEntry.fetchedAt > PROFILE_STALE)) {
+          profileBudget--;
+          profileTasks.push(safe(async () => {
+            const r = await api(`/teams/statistics?league=${m.leagueId}&season=${m.season}&team=${teamId}`);
+            profileStore.teams[teamKey] = { data: r[0] || null, fetchedAt: now };
+            saveProfiles();
+          }));
+        }
       }
     }
 
-    await Promise.all([...statTasks, ...otherTasks]);
+    await Promise.all([...statTasks, ...otherTasks, ...profileTasks]);
 
     // Bildirim kuralları. En az bir takımda sayısal xG varsa maç xG verisine sahip kabul edilir.
     let xgBlocked = 0;
@@ -577,6 +699,31 @@ async function poll() {
     for (const m of playing) {
       const x = extra.get(m.id) || {};
       m.goalAnalysis = analyzeGoalWindows(x, m);
+      const S = x.stats;
+      const prediction = scoreGoalContext({ ...m, red: S?.all?.red }, profileContext(m, x), m.goalAnalysis || {});
+      updateTraining(m, x, prediction, now);
+      m.goalPrediction = prediction;
+      if (prediction.signal && !modelStore.sentSignals[String(m.id)]) {
+        await safe(async () => {
+          const lines = [
+            `⚽ <b>OTOMATİK GOL SİNYALİ</b>`,
+            `🏟 ${htmlSafe(m.home)} – ${htmlSafe(m.away)}`,
+            `⏱ ${m.minute}' · Skor ${m.homeGoals}-${m.awayGoals}`,
+            `🎯 Takip penceresi: Önümüzdeki 10 dakika`,
+            `📊 Model puanı: <b>${prediction.score}/100</b> · Canlı baskı: ${prediction.livePressure}/100`,
+            prediction.probability == null ? `🧪 Gerçek olasılık modeli: veri birikiyor` : `🎯 Deneysel 10 dk tahmini: <b>%${prediction.probability}</b>`,
+            `📈 Maç önü oranları 1-X-2: ${prediction.preOdds?.home ?? "–"} / ${prediction.preOdds?.draw ?? "–"} / ${prediction.preOdds?.away ?? "–"}`,
+            `📈 2.5 üst piyasa olasılığı: ${prediction.over25Probability == null ? "veri yok" : "%" + Math.round(prediction.over25Probability * 100)}`,
+            `🏆 Sıralama: ${prediction.context.homeRank ?? "–"}. / ${prediction.context.awayRank ?? "–"}.`,
+            `🏠 İç saha gol ort.: ${prediction.context.homeScored ?? "–"} · ✈️ Deplasman gol ort.: ${prediction.context.awayScored ?? "–"}`,
+            `🔎 Veri kapsamı: %${prediction.coverage}`,
+          ];
+          await sendTelegram(lines.join("\n"));
+          modelStore.sentSignals[String(m.id)] = now;
+          saveModel();
+          console.log("Gol sinyali gönderildi:", m.home, "-", m.away, prediction.score);
+        });
+      }
     }
     cache = { matches: all, updated: now, error: warns[0] || "" };
     const log = `[poll] fikstür=${schedule.length} canlı=${liveMap.size} istatistik_maç=${statCandidates.length} istatistik_toplu_istek=${statsBatchCount} xG_verisi_yok=${xgBlocked} bildirim=${notifications.length} kalan_istek=${quota ?? "?"}`;
@@ -634,7 +781,7 @@ app.post("/api/state", auth, (req, res) => {
 
 app.get("/api/matches", auth, (req, res) => {
   res.json({
-    matches: cache.matches.map(({ id, home, away, minute, status, homeGoals, awayGoals, country, league, short, kickoff, goalAnalysis }) => ({ id, home, away, minute, status, homeGoals, awayGoals, country, league, short, kickoff, goalAnalysis: goalAnalysis || null })),
+    matches: cache.matches.map(({ id, home, away, minute, status, homeGoals, awayGoals, country, league, short, kickoff, goalAnalysis, goalPrediction }) => ({ id, home, away, minute, status, homeGoals, awayGoals, country, league, short, kickoff, goalAnalysis: goalAnalysis || null, goalPrediction: goalPrediction || null })),
     updated: cache.updated,
     error: cache.error,
     active,

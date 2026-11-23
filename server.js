@@ -10,7 +10,7 @@ const sec = (v, def, min) => Math.max(min, Number(v) || def);
 const POLL = 60;                 // canlı maç listesi ve kontrol döngüsü: 60 saniye
 const STATS = 60;                // istatistik güncelleme kontrolü: 60 saniye
 const STATS_BATCH_SIZE = 20;    // /fixtures?ids= tek istekte en fazla 20 maç
-const FINAL_CHECK = 10 * 60;      // bildirimli maçların bitiş skorunu 10 dakikada bir kontrol et
+const FINAL_CHECK = 60;           // bildirimli maçların canlı skorunu dakikada bir senkronize et
 const REQUIRE_XG = true; // xG verisi olmayan maçlarda hiçbir bildirim gönderilmez.
 const LEAGUES = (env.LEAGUE_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
 
@@ -79,8 +79,11 @@ async function fetchStatsBatch(ids) {
 }
 
 // Gol olayları (dakikalarıyla). Kendi kalesine golde taraf, güncel skorla eşleşen yönle belirlenir.
+async function fetchMatchEvents(m) {
+  return await api(`/fixtures/events?fixture=${m.id}`);
+}
 async function fetchGoals(m) {
-  const ev = (await api(`/fixtures/events?fixture=${m.id}`)).filter((e) => e.type === "Goal" && !/missed|cancel/i.test(e.detail || ""));
+  const ev = (await fetchMatchEvents(m)).filter((e) => e.type === "Goal" && !/missed|cancel/i.test(e.detail || ""));
   const mk = (flip) => ev.map((e) => {
     let side = e.team?.id === m.homeId ? "home" : "away";
     if (flip && /own/i.test(e.detail || "")) side = side === "home" ? "away" : "home";
@@ -259,8 +262,10 @@ function last10Rows(x, m) {
 const GOAL_METRICS = [
   { key: "xg", names: ["expected_goals", "xg", "Expected Goals"], max: 0.75, weight: 24, label: "xG artışı" },
   { key: "sot", names: ["Shots on Goal", "Shots on Target"], max: 4, weight: 20, label: "İsabetli şut" },
-  { key: "inside", names: ["Shots insidebox", "Shots Inside Box"], max: 5, weight: 18, label: "Ceza sahası içi şut" },
-  { key: "shots", names: ["Total Shots", "Total shots"], max: 8, weight: 14, label: "Toplam şut" },
+  { key: "inside", names: ["Shots insidebox", "Shots Inside Box"], max: 5, weight: 22, label: "Ceza sahası içi şut" },
+  { key: "outside", names: ["Shots outsidebox", "Shots Outside Box"], max: 6, weight: 3, label: "Ceza sahası dışı şut" },
+  { key: "shots", names: ["Total Shots", "Total shots"], max: 8, weight: 10, label: "Toplam şut" },
+  { key: "fouls", names: ["Fouls", "Foul"], max: 8, weight: 0, label: "Faul" },
   { key: "corners", names: ["Corner Kicks", "Corners"], max: 4, weight: 9, label: "Korner" },
   { key: "blocked", names: ["Blocked Shots"], max: 3, weight: 5, label: "Engellenen şut" },
   { key: "saves", names: ["Goalkeeper Saves", "Saves"], max: 3, weight: 4, label: "Kaleci kurtarışı" },
@@ -304,19 +309,26 @@ function scoreGoalWindow(window) {
   for (const metric of GOAL_METRICS) {
     const value = window.metrics[metric.key]?.total;
     if (value == null || !Number.isFinite(value)) continue;
-    available++;
-    coverage += metric.weight;
+    if (metric.weight > 0) { available++; coverage += metric.weight; }
     const points = Math.min(1, Math.max(0, value / metric.max)) * metric.weight;
     score += points;
     if (points >= 1) contributions.push({ label: metric.label, value: +value.toFixed(2), points: Math.round(points) });
   }
   // Çok az veri olan maçta puanın aşırı iddialı görünmesini engelle.
   let finalScore = Math.round(score);
+  const inside = window.metrics.inside?.total;
+  const outside = window.metrics.outside?.total;
+  const fouls = window.metrics.fouls?.total;
+  const shots = window.metrics.shots?.total;
+  const insideRatio = inside != null && outside != null && inside + outside > 0 ? inside / (inside + outside) : null;
+  const outsidePenalty = insideRatio == null ? 0 : Math.max(0, Math.min(12, (0.45 - insideRatio) / 0.45 * 12));
+  const foulPenalty = fouls == null ? 0 : Math.max(0, Math.min(10, (fouls - 4) * 1.5)) * (shots != null && shots >= 3 ? 0.45 : 1);
+  finalScore = Math.max(0, Math.round(finalScore - foulPenalty - outsidePenalty));
   if (available < 2) finalScore = Math.min(finalScore, 35);
   else if (available < 3) finalScore = Math.min(finalScore, 50);
   const level = finalScore >= 70 ? "Çok yüksek baskı" : finalScore >= 55 ? "Yüksek baskı" : finalScore >= 35 ? "Orta baskı" : "Düşük baskı";
   const coverageLabel = coverage >= 75 ? "Geniş" : coverage >= 50 ? "Orta" : "Sınırlı";
-  return { ready: true, score: finalScore, level, coverage, coverageLabel, available, metrics: window.metrics, contributions: contributions.sort((a,b) => b.points-a.points).slice(0,3) };
+  return { ready: true, score: finalScore, level, coverage, coverageLabel, available, metrics: window.metrics, tempo: { insideRatio, outsidePenalty: +outsidePenalty.toFixed(1), foulPenalty: +foulPenalty.toFixed(1) }, contributions: contributions.sort((a,b) => b.points-a.points).slice(0,3) };
 }
 function analyzeGoalWindows(x, m) {
   if (!x.stats || !RUNNING.has(m.short)) return { ready: false, status: "Canlı istatistik bekleniyor", w10: null, w15: null };
@@ -407,12 +419,53 @@ function addNotification(m, rule, minute, sentAt) {
     minute: Number(minute) || 0,
     sentAt, date: localDate(new Date(sentAt)),
     scoreAt: { home: m.homeGoals ?? null, away: m.awayGoals ?? null },
+    currentScore: { home: m.homeGoals ?? null, away: m.awayGoals ?? null },
+    goalMinutes: [], status: m.short || "LIVE", currentMinute: Number(m.minute) || 0,
     finalScore: null, finalStatus: null, finishedAt: null,
   });
   // Dosyanın sınırsız büyümesini önle; yaklaşık son 1 yıllık geçmişi tut.
   const cutoff = Date.now() - 366 * 86400000;
   notifications = notifications.filter((n) => n.sentAt >= cutoff).slice(-30000);
   saveNotifications();
+}
+
+function addGoalSignalNotification(m, prediction, sentAt, goalMinutes = []) {
+  notifications.push({
+    id: `goal-${m.id}-${sentAt}`,
+    fixtureId: String(m.id), home: m.home, away: m.away,
+    country: m.country || "", league: m.league || "", ruleName: "Otomatik gol sinyali",
+    kind: "goal-signal", minute: Number(m.minute) || 0, sentAt,
+    date: localDate(new Date(sentAt)),
+    scoreAt: { home: m.homeGoals ?? null, away: m.awayGoals ?? null },
+    currentScore: { home: m.homeGoals ?? null, away: m.awayGoals ?? null },
+    currentMinute: Number(m.minute) || 0, status: m.short || "LIVE",
+    goalMinutes: Array.isArray(goalMinutes) ? goalMinutes.map(g => Number(g.minute)).filter(Number.isFinite) : [],
+    signalScore: prediction.score, probability: prediction.probability ?? null,
+    signalReason: (prediction.components || []).filter(c => c.value != null).sort((a,b) => (b.value*b.weight)-(a.value*a.weight)).slice(0,3).map(c => c.label),
+    finalScore: null, finalStatus: null, finishedAt: null,
+  });
+  const cutoff = Date.now() - 366 * 86400000;
+  notifications = notifications.filter(n => n.sentAt >= cutoff).slice(-30000);
+  saveNotifications();
+}
+
+function syncNotificationLiveState() {
+  let changed = false;
+  for (const n of notifications) {
+    const m = liveMap.get(Number(n.fixtureId)) || schedule.find(v => String(v.id) === String(n.fixtureId));
+    if (!m) continue;
+    const x = extra.get(Number(n.fixtureId)) || extra.get(n.fixtureId) || {};
+    const score = { home: m.homeGoals ?? null, away: m.awayGoals ?? null };
+    const goals = Array.isArray(x.goals) ? x.goals.map(g => Number(g.minute)).filter(Number.isFinite).sort((a,b)=>a-b) : (n.goalMinutes || []);
+    const nextStatus = m.short || m.status || n.status;
+    if (JSON.stringify(n.currentScore) !== JSON.stringify(score) || n.currentMinute !== Number(m.minute || 0) || n.status !== nextStatus || JSON.stringify(n.goalMinutes || []) !== JSON.stringify(goals)) {
+      n.currentScore = score; n.currentMinute = Number(m.minute) || 0; n.status = nextStatus; n.goalMinutes = goals; changed = true;
+    }
+    if (FINISHED.has(m.short) && !n.finalScore && score.home != null && score.away != null) {
+      n.finalScore = score; n.finalStatus = m.short; n.finishedAt = Date.now(); changed = true;
+    }
+  }
+  if (changed) saveNotifications();
 }
 
 async function updateFinalScores() {
@@ -476,16 +529,21 @@ function updateTraining(m, x, prediction, now) {
   const previousSamples = modelStore.samples.filter((v) => String(v.fixtureId) === String(m.id));
   const lastStoredMinute = previousSamples.length ? Math.max(...previousSamples.map((v) => Number(v.minute) || 0)) : -100;
   const last = Math.max(Number(x.lastModelSampleMinute ?? -100), lastStoredMinute);
-  if (Number(m.minute) >= 5 && Number(m.minute) - last >= 10 && prediction?.ready && prediction.livePressure != null && prediction.coverage >= 60) {
+  const latestGoalMinute = Array.isArray(x.goals) && x.goals.length ? Math.max(...x.goals.map(g => Number(g.minute) || 0)) : 0;
+  const goalJustScored = latestGoalMinute > 0 && Number(m.minute) - latestGoalMinute <= 5;
+  const sampleGap = goalJustScored ? 5 : 10;
+  const targetGap = goalJustScored ? 5 : 10;
+  if (Number(m.minute) >= 5 && Number(m.minute) - last >= sampleGap && prediction?.ready && prediction.livePressure != null && prediction.coverage >= 60) {
     modelStore.samples.push({
-      fixtureId: String(m.id), minute: Number(m.minute), targetMinute: Number(m.minute) + 10,
-      scoreAt: totalGoals, x: trainingVector(prediction), y: null, createdAt: now,
+      version: 4, fixtureId: String(m.id), minute: Number(m.minute), targetMinute: Number(m.minute) + targetGap,
+      scoreAt: totalGoals, goalCountAt: Array.isArray(x.goals) ? x.goals.length : totalGoals,
+      x: trainingVector(prediction), y: null, createdAt: now, windowMinutes: targetGap,
     });
     x.lastModelSampleMinute = Number(m.minute);
     changed = true;
   }
   if (modelStore.samples.length > 30000) modelStore.samples = modelStore.samples.slice(-30000);
-  const labelledRows = modelStore.samples.filter((v) => v.y === 0 || v.y === 1);
+  const labelledRows = modelStore.samples.filter((v) => Array.isArray(v.x) && v.x.length === 18 && (v.y === 0 || v.y === 1));
   const labelled = labelledRows.length;
   const positives = labelledRows.filter((v) => v.y === 1).length;
   const negatives = labelled - positives;
@@ -505,7 +563,7 @@ function updateTraining(m, x, prediction, now) {
     prediction.probabilityLabel = probability == null ? "Model henüz eğitilmedi" : "Geçmiş örneklerle eğitilmiş deneysel tahmin";
   }
   prediction.training = {
-    labelledSamples: modelStore.samples.filter((v) => v.y === 0 || v.y === 1).length,
+    labelledSamples: modelStore.samples.filter((v) => Array.isArray(v.x) && v.x.length === 18 && (v.y === 0 || v.y === 1)).length,
     pendingSamples: modelStore.samples.filter((v) => v.y === null).length,
     trainedSamples: modelStore.trainedCount || 0,
   };
@@ -588,7 +646,7 @@ async function poll() {
     const otherTasks = [];
     const profileTasks = [];
     let profileBudget = 2;
-    let preBudget = 1, eventBudget = 1;
+    let preBudget = 1, eventBudget = 5;
     for (const m of all) {
       if (!m.inPlay) continue;
       const x = extra.get(m.id) || {};
@@ -598,10 +656,22 @@ async function poll() {
         .flatMap((r) => r.conditions || []);
       const info = condInfo(conditions);
       const goalTotal = (m.homeGoals ?? 0) + (m.awayGoals ?? 0);
-      if (eventBudget > 0 && info.goals && !Array.isArray(x.events) && x.evTotal !== goalTotal && now - (x.evAt || 0) > 20000) {
-        eventBudget--;
-        x.evAt = now;
-        otherTasks.push(safe(async () => { x.goals = await fetchGoals(m); x.evTotal = goalTotal; }));
+      // Kart ve oyuncu değişiklikleri de gol modelinin girdisi. Her maçı sık sorgulamak yerine 3 dakikada bir, sınırlı bütçeyle yenile.
+      if (eventBudget > 0 && (goalTotal !== x.evTotal || now - (x.eventsAt || 0) > 60000)) {
+        eventBudget--; x.eventsAt = now;
+        otherTasks.push(safe(async () => {
+          x.events = await fetchMatchEvents(m);
+          const goalEvents = x.events.filter((e) => e.type === "Goal" && !/missed|cancel/i.test(e.detail || ""));
+          const mk = (flip) => goalEvents.map((e) => {
+            let side = e.team?.id === m.homeId ? "home" : "away";
+            if (flip && /own/i.test(e.detail || "")) side = side === "home" ? "away" : "home";
+            return { minute: Number(e.time?.elapsed ?? 0), side };
+          });
+          const a = mk(false), b = mk(true);
+          const ok = (list) => list.filter(g => g.side === "home").length === (m.homeGoals ?? 0) && list.filter(g => g.side === "away").length === (m.awayGoals ?? 0);
+          x.goals = ok(a) ? a : ok(b) ? b : a;
+          x.evTotal = goalTotal;
+        }));
       }
       if (preBudget > 0 && needs(rules, m).pre && x.preAt === undefined) {
         preBudget--; x.preAt = now;
@@ -694,16 +764,21 @@ async function poll() {
       finalCheckAt = now;
       await safe(updateFinalScores);
     }
+    syncNotificationLiveState();
 
     // Her canlı maç için son 10 ve 15 dakikalık gol baskısı puanlarını üret.
     for (const m of playing) {
       const x = extra.get(m.id) || {};
       m.goalAnalysis = analyzeGoalWindows(x, m);
       const S = x.stats;
-      const prediction = scoreGoalContext({ ...m, red: S?.all?.red }, profileContext(m, x), m.goalAnalysis || {});
+      const prediction = scoreGoalContext({ ...m, red: S?.all?.red }, profileContext(m, x), { ...(m.goalAnalysis || {}), events: x.events || [], hist: x.hist || [], currentRows: S?.lists?.all || {} });
       updateTraining(m, x, prediction, now);
       m.goalPrediction = prediction;
-      if (prediction.signal && !modelStore.sentSignals[String(m.id)]) {
+      const currentGoalCount = Array.isArray(x.goals) ? x.goals.length : ((Number(m.homeGoals)||0)+(Number(m.awayGoals)||0));
+      const signalKey = `${m.id}:${currentGoalCount}`;
+      const latestGoalMinute = Array.isArray(x.goals) && x.goals.length ? Math.max(...x.goals.map(g => Number(g.minute)||0)) : 0;
+      const afterGoalSettled = !latestGoalMinute || Number(m.minute) - latestGoalMinute >= 2;
+      if (prediction.signal && afterGoalSettled && !modelStore.sentSignals[signalKey]) {
         await safe(async () => {
           const lines = [
             `⚽ <b>OTOMATİK GOL SİNYALİ</b>`,
@@ -716,15 +791,22 @@ async function poll() {
             `📈 2.5 üst piyasa olasılığı: ${prediction.over25Probability == null ? "veri yok" : "%" + Math.round(prediction.over25Probability * 100)}`,
             `🏆 Sıralama: ${prediction.context.homeRank ?? "–"}. / ${prediction.context.awayRank ?? "–"}.`,
             `🏠 İç saha gol ort.: ${prediction.context.homeScored ?? "–"} · ✈️ Deplasman gol ort.: ${prediction.context.awayScored ?? "–"}`,
+            `🎯 Ceza sahası içi/dışı şut: ${prediction.features.insideShots ?? "–"} / ${prediction.features.outsideShots ?? "–"}`,
+            `🚩 Son 10 dk faul: ${prediction.features.fouls ?? "–"} · Tempo cezası: ${prediction.features.foulPenalty ?? 0}`,
+            `🟥 Kırmızı kart: Ev ${prediction.features.redHome} / Dep ${prediction.features.redAway}`,
+            `🔄 Gerideyken 60+ değişiklik: ${prediction.features.trailingSubCount ?? 0}`,
+            `⏳ Son 15 dk gol yeme verisi: Ev ${prediction.context.homeLateConceded ?? "–"} / Dep ${prediction.context.awayLateConceded ?? "–"}`,
             `🔎 Veri kapsamı: %${prediction.coverage}`,
           ];
           await sendTelegram(lines.join("\n"));
-          modelStore.sentSignals[String(m.id)] = now;
+          addGoalSignalNotification(m, prediction, now, x.goals || []);
+          modelStore.sentSignals[signalKey] = now;
           saveModel();
           console.log("Gol sinyali gönderildi:", m.home, "-", m.away, prediction.score);
         });
       }
     }
+    syncNotificationLiveState();
     cache = { matches: all, updated: now, error: warns[0] || "" };
     const log = `[poll] fikstür=${schedule.length} canlı=${liveMap.size} istatistik_maç=${statCandidates.length} istatistik_toplu_istek=${statsBatchCount} xG_verisi_yok=${xgBlocked} bildirim=${notifications.length} kalan_istek=${quota ?? "?"}`;
     if (log !== lastLog) { console.log(log); lastLog = log; }

@@ -504,8 +504,59 @@ async function loadLearningItems(type,show=true){
   }catch(e){box.innerHTML=`<div class="learn-empty">${esc(e.message)}</div>`}
 }
 
+const CMP_SOURCES=["gol-bildirim","claude","gemini"];
+const CMP_LABEL={"gol-bildirim":"Gol Bildirim","claude":"Claude","gemini":"Gemini"};
+function cmpScoreText(v){
+  if(!v||v.score==null)return "—";
+  const n=Number(v.score);
+  return Number.isFinite(n)?n.toFixed(1).replace(/\.0$/,"")+"/100":"—";
+}
+function renderComparisonLive(data){
+  const items=data?.items||[];
+  $("cmpLiveCount").textContent=items.length+" maç";
+  if(!items.length){
+    $("cmpLiveList").innerHTML='<p class="empty">Şu anda karşılaştırma merkezinde açık bildirimi bulunan maç yok.</p>';
+    return;
+  }
+  $("cmpLiveList").innerHTML=items.map(m=>{
+    const notices=m.notifications||[];
+    const notified=new Set(notices.map(n=>n.source));
+    const count=CMP_SOURCES.filter(s=>notified.has(s)).length;
+    const scores=m.scores||{};
+    const latest=Object.values(scores).filter(Boolean).sort((a,b)=>new Date(b.captured_at||0)-new Date(a.captured_at||0))[0];
+    const actual=latest&&latest.home_goals!=null&&latest.away_goals!=null?latest.home_goals+" – "+latest.away_goals:"Skor bekleniyor";
+    const minute=Math.max(Number(m.latest_notification_minute)||0,...notices.map(n=>Number(n.minute)||0),...Object.values(scores).map(s=>Number(s?.minute)||0));
+    const cells=CMP_SOURCES.map(source=>{
+      const v=scores[source]||{};
+      const notice=notices.find(n=>n.source===source);
+      const fallback=notice&&notice.source_score!=null?{score:notice.source_score}:null;
+      const shown=v.score!=null?v:fallback;
+      const score=cmpScoreText(shown);
+      const matchScore=v.home_goals!=null&&v.away_goals!=null?String(v.home_goals)+" – "+String(v.away_goals):"Maç skoru yok";
+      const age=v.captured_at?Math.max(0,Math.floor((Date.now()-new Date(v.captured_at).getTime())/60000)):null;
+      const freshness=age==null?"güncel veri yok":age===0?"az önce":age+" dk önce";
+      return '<div class="cmp-score-cell '+(notified.has(source)?"hit":"")+'"><small>'+CMP_LABEL[source]+(notified.has(source)?" · BİLDİRİM":"")+'</small><b>'+score+'</b><em>'+matchScore+' · '+freshness+'</em></div>';
+    }).join("");
+    const badges=CMP_SOURCES.map(source=>'<span class="cmp-source '+(notified.has(source)?"":"none")+'">'+CMP_LABEL[source]+' '+(notified.has(source)?"BİLDİRDİ":"—")+'</span>').join("");
+    const all=count===3?'<span class="cmp-all">✓ 3/3 ALGORİTMA BİLDİRDİ</span>':'<span class="cmp-all">'+count+'/3 bildirim</span>';
+    const details=notices.slice().sort((a,b)=>new Date(a.notified_at)-new Date(b.notified_at)).map(n=>CMP_LABEL[n.source]+": "+n.minute+"' · alarm puanı "+(n.source_score==null?"—":Number(n.source_score).toFixed(1))).join(" | ");
+    return '<article class="cmp-match"><div class="cmp-match-top"><div><div class="cmp-teams">'+esc(m.home||"Ev")+' – '+esc(m.away||"Deplasman")+'</div><div class="cmp-meta">Maç '+esc(m.fixture_id)+' · '+minute+"' · "+notices.length+' bildirim kaydı</div></div><div class="cmp-live-score">'+actual+'</div></div><div class="cmp-alert-sources">'+badges+all+'</div><div class="cmp-score-grid">'+cells+'</div><div class="cmp-foot">'+esc(details)+'</div></article>';
+  }).join("");
+}
+async function loadComparisonLive(){
+  try{
+    const r=await fetch("/api/comparison/live",{headers:H()});
+    if(!r.ok)throw new Error(r.status===503?"Karşılaştırma servisi yapılandırılmamış":"Canlı karşılaştırma verisi alınamadı");
+    renderComparisonLive(await r.json());
+  }catch(e){
+    $("cmpLiveCount").textContent="Bağlantı yok";
+    $("cmpLiveList").innerHTML='<p class="empty">'+esc(e.message)+'</p>';
+  }
+}
+
 async function loadDashboard(){
   if(tab!=="d")return;
+  loadComparisonLive();
   try{
     const date=$("ddate").value;
     const r=await fetch(`/api/notifications?date=${encodeURIComponent(date||"")}`,{headers:H()});

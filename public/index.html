@@ -699,6 +699,10 @@ document.addEventListener("input",e=>{
   }
   r[d.f]=t.value;
 });
+document.addEventListener("change",e=>{
+  if(e.target.id==="gaLeagueFilter"){gaLeagueFilter=e.target.value;renderGoalAnalysis();return;}
+  if(e.target.id==="gaSort"){gaSort=e.target.value;renderGoalAnalysis();return;}
+});
 document.addEventListener("click",e=>{
   const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om],[data-per],[data-fdel],[data-adel],[data-dfilter],[data-dmatch],[data-learning-type],[data-close-match],#learnRefresh,#fbtn,#faddc,#fclear,#fapply,#andbtn,#andtoggle,#andaddc,#andclear,#andapply,#dashRefresh");
   if(!b)return;const d=b.dataset;

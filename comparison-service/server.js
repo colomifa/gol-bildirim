@@ -192,12 +192,14 @@ app.post("/v1/match-state", async (req, res) => {
   try {
     await client.query("BEGIN");
     const q = await client.query(
-      "SELECT id, minute FROM algorithm_goal_notifications WHERE fixture_id=$1 AND outcome IN ('pending','window_passed') FOR UPDATE",
+      "SELECT id, minute, outcome, outcome_goal_minute FROM algorithm_goal_notifications WHERE fixture_id=$1 AND UPPER(COALESCE(match_status, 'LIVE')) NOT IN ('FT','AET','PEN','AWD','WO') FOR UPDATE",
       [String(b.fixture_id)]
     );
     let updated = 0;
     for (const n of q.rows) {
-      const result = evaluate(n, b.goal_minutes, finished);
+      const result = (n.outcome === "pending" || n.outcome === "window_passed")
+        ? evaluate(n, b.goal_minutes, finished)
+        : { outcome: n.outcome, goalMinute: n.outcome_goal_minute, resolved: true };
       await client.query(`
         UPDATE algorithm_goal_notifications
         SET goal_minutes=$2::jsonb, match_status=$3, final_score=CASE WHEN $4 THEN $5::jsonb ELSE final_score END,
@@ -225,8 +227,7 @@ app.get("/v1/live-notifications", async (_req, res) => {
       WITH live_notifications AS (
         SELECT *
         FROM algorithm_goal_notifications
-        WHERE outcome IN ('pending','window_passed')
-          AND UPPER(COALESCE(match_status, 'LIVE')) NOT IN ('FT','AET','PEN','AWD','WO')
+        WHERE UPPER(COALESCE(match_status, 'LIVE')) NOT IN ('FT','AET','PEN','AWD','WO')
       ),
       latest_scores AS (
         SELECT DISTINCT ON (source, fixture_id)

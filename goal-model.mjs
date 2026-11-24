@@ -8,32 +8,59 @@ function teamSummary(raw, venue) {
   const f=raw.fixtures||{},g=raw.goals||{},played=num(f.played?.[venue]),scored=num(g.for?.average?.[venue]),conceded=num(g.against?.average?.[venue]);
   const winRaw=f.wins?.[venue]?.percentage??f.wins?.[venue]?.percent,winCount=num(f.wins?.[venue]);
   const lossRaw=f.loses?.[venue]?.percentage??f.loses?.[venue]?.percent,lossCount=num(f.loses?.[venue]);
-  return {played,scored,conceded,winPct:winRaw!=null?pct(winRaw):played&&winCount!=null?winCount/played*100:null,lossPct:lossRaw!=null?pct(lossRaw):played&&lossCount!=null?lossCount/played*100:null,lateConceded:minuteBucket(g.against?.minute)};
+  const concededTotal=num(g.against?.total?.total) ?? (((num(g.against?.total?.home)||0)+(num(g.against?.total?.away)||0)) || null);
+  const late=minuteBucket(g.against?.minute, played, concededTotal);
+  return {played,scored,conceded,winPct:winRaw!=null?pct(winRaw):played&&winCount!=null?winCount/played*100:null,lossPct:lossRaw!=null?pct(lossRaw):played&&lossCount!=null?lossCount/played*100:null,lateConceded:late?.perMatch??null,lateConcededPct:late?.percentage??null};
 }
-function minuteBucket(obj) {
+function minuteBucket(obj, played, totalConceded) {
   if (!obj || typeof obj !== "object") return null;
   const keys=Object.keys(obj); const key=keys.find(k=>/^76\s*[-–]\s*90/.test(k)) || keys.find(k=>/^75\s*[-–]/.test(k));
-  const v=key?obj[key]:null; return num(v?.total) ?? num(v?.percentage) ?? null;
+  const v=key?obj[key]:null; if(!v) return null;
+  const total=num(v.total), percentage=pct(v.percentage);
+  const perMatch=total!=null&&played>0?total/played:null;
+  const share=percentage!=null?percentage:(total!=null&&totalConceded>0?total/totalConceded*100:null);
+  return {total,percentage:share,perMatch};
 }
 function impliedOdds(odds) { if(!odds)return null; const o=num(odds.over25),u=num(odds.under25); if(o==null||u==null||o<=1||u<=1)return null; const po=1/o,pu=1/u; return po/(po+pu); }
 const tableTeam=(rows,id)=>Array.isArray(rows)?rows.find(r=>String(r.team?.id)===String(id))||null:null;
 const metric=(w,k,side)=>num(w?.metrics?.[k]?.[side]);
-function eventContext(events, match) {
+export function eventContext(events, match) {
   const red={home:0,away:0}, subs={home:0,away:0}, trailingSub={home:0,away:0}, lastSubMinute={home:null,away:null};
-  for(const e of events||[]) {
-    const side=e.team?.id===match.homeId?"home":e.team?.id===match.awayId?"away":null; if(!side)continue;
-    const type=String(e.type||"").toLowerCase(), detail=String(e.detail||"").toLowerCase(), minute=num(e.time?.elapsed)||0;
-    if(type==="card" && /red card|second yellow|second yellow card/.test(detail)) red[side]++;
-    if(type==="subst" || /substitution/.test(detail)) {
-      subs[side]++; lastSubMinute[side]=Math.max(lastSubMinute[side]??0,minute);
-      const h=num(match.homeGoals)||0,a=num(match.awayGoals)||0;
-      const trailing=side==="home"?h<a:a<h;
-      if(trailing && minute>=60) trailingSub[side]++;
+  const goals=[], substitutions=[], cards=[];
+  const ordered=(events||[]).map((e,i)=>({e,i,minute:num(e.time?.elapsed)||0})).sort((a,b)=>a.minute-b.minute||a.i-b.i);
+  let score={home:0,away:0};
+  for(const item of ordered) {
+    const e=item.e, minute=item.minute;
+    const rawSide=e.team?.id===match.homeId?"home":e.team?.id===match.awayId?"away":null; if(!rawSide)continue;
+    const type=String(e.type||"").toLowerCase(), detail=String(e.detail||"").toLowerCase();
+    if(type==="goal" && !/missed|cancel/.test(detail)) {
+      const side=/own/.test(detail)?(rawSide==="home"?"away":"home"):rawSide;
+      score[side]++;
+      goals.push({side,minute,scoreAfter:{...score}});
+    } else if(type==="card") {
+      const isRed=/red card|second yellow|second yellow card/.test(detail);
+      cards.push({side:rawSide,minute,red:isRed,scoreAt:{...score}});
+      if(isRed) red[rawSide]++;
+    } else if(type==="subst" || /substitution/.test(detail)) {
+      subs[rawSide]++; lastSubMinute[rawSide]=Math.max(lastSubMinute[rawSide]??0,minute);
+      const scoreAt={...score}, diff=scoreAt.home-scoreAt.away;
+      const trailingAtSub=rawSide==="home"?diff<0:diff>0;
+      const leadingOrTiedAtSub=rawSide==="home"?diff>=0:diff<=0;
+      const sub={side:rawSide,minute,player:e.player?.name||null,assist:e.assist?.name||null,scoreAt,trailingAtSub,leadingOrTiedAtSub};
+      substitutions.push(sub);
+      if(trailingAtSub && minute>=60) trailingSub[rawSide]++;
     }
   }
-  const trailingSide=(num(match.homeGoals)||0)<(num(match.awayGoals)||0)?"home":(num(match.awayGoals)||0)<(num(match.homeGoals)||0)?"away":null;
-  return {red,subs,trailingSub,lastSubMinute,trailingSide};
+  // API event list may not include all earlier goal events; use current score as a consistency fallback only for current state.
+  const scoreDiff=(num(match.homeGoals)||0)-(num(match.awayGoals)||0);
+  const trailingSide=scoreDiff<0?"home":scoreDiff>0?"away":null;
+  const leadingSide=scoreDiff>0?"home":scoreDiff<0?"away":null;
+  const latestGoal=goals.at(-1)||null;
+  const afterGoalSubs=latestGoal?substitutions.filter(s=>s.side===latestGoal.side && s.minute>=latestGoal.minute && s.minute-latestGoal.minute<=12 && s.leadingOrTiedAtSub):[];
+  const scoreProtectSub=afterGoalSubs.length>0;
+  return {red,subs,trailingSub,lastSubMinute,trailingSide,leadingSide,latestGoal,afterGoalSubs,scoreProtectSub,goals,substitutions,cards};
 }
+
 function rowStat(rows, names) {
   for (const name of names) { const r=(rows||[]).find(v=>String(v.type).toLowerCase()===name.toLowerCase()); const n=num(r?.value); if(n!=null)return n; }
   return null;
@@ -81,8 +108,9 @@ export function scoreGoalContext(match, context={}, live={}) {
   const tempoScore=insideRatio==null&&fouls==null?null:clamp(75+(insideRatio==null?0:(insideRatio-.25)*45)-foulPenalty-outsidePenalty);
   const redScore=events.red.home+events.red.away===0?50:clamp(50+redDiff*22);
   const subScore=trailingSubCount===0?50:clamp(60+Math.min(2,trailingSubCount)*10+(postSubPressure!=null&&postSubPressure>=55?15:0));
-  const lateConcede=avg(home?.lateConceded,away?.lateConceded);
-  const lateScore=lateConcede==null?null:clamp(lateConcede>1?80:lateConcede>0?65:35);
+  const homeLateRate=home?.lateConceded??null, awayLateRate=away?.lateConceded??null;
+  const lateConcede=avg(homeLateRate,awayLateRate);
+  const lateScore=lateConcede==null?null:clamp(50+lateConcede*22);
   const minuteScore=minute>=20&&minute<=78?85:minute>=10&&minute<=85?65:40;
   // Skorun maçın beklenen gol seviyesini aşması, kalan bölümde ek gol sinyalini azaltır.
   // Bu ceza mutlak değildir: canlı baskı ve savunma zaafı yüksekse diğer bileşenler sinyali koruyabilir.
@@ -91,13 +119,61 @@ export function scoreGoalContext(match, context={}, live={}) {
   const goalSurplus=expectedByMinute==null?null:Math.max(0,totalGoals-expectedByMinute);
   const scoreSurplusPenalty=goalSurplus==null?0:clamp(goalSurplus*8 + Math.max(0,totalGoals-3)*4,0,32);
   const scoreState=clamp(82-scoreSurplusPenalty);
-  const homeOdds=num(odds.home),awayOdds=num(odds.away);
-  const favoriteSide=homeOdds!=null&&awayOdds!=null?(homeOdds<awayOdds?"home":awayOdds<homeOdds?"away":null):null;
+  const homeOdds=num(odds.home),drawOdds=num(odds.draw),awayOdds=num(odds.away);
+  const oneXtwo=[homeOdds,drawOdds,awayOdds];
+  const rawProb=oneXtwo.every(v=>v!=null&&v>1)?oneXtwo.map(v=>1/v):null;
+  const overround=rawProb?.reduce((a,b)=>a+b,0)||0;
+  const fairProb=overround>0?rawProb.map(v=>v/overround):null;
+  const favoriteGap=fairProb?Math.abs(fairProb[0]-fairProb[2]):null;
+  const favoriteSide=fairProb&&favoriteGap>=0.03?(fairProb[0]>fairProb[2]?"home":"away"):null;
   const favoriteTrailing= favoriteSide && ((favoriteSide==="home" && scoreDiff<0)||(favoriteSide==="away" && scoreDiff>0));
   const favoriteLeadingByTwo= favoriteSide && ((favoriteSide==="home" && scoreDiff>=2)||(favoriteSide==="away" && scoreDiff<=-2));
   const trailingFavoriteBoost=favoriteTrailing?18:0;
   const leadingFavoritePenalty=favoriteLeadingByTwo?12:0;
   const gameScore=clamp(minuteScore*.45+scoreState*.45+(events.red.home+events.red.away?5:0)+trailingFavoriteBoost-leadingFavoritePenalty);
+  const latestGoal=events.latestGoal;
+  const minutesSinceGoal=latestGoal?Math.max(0,minute-latestGoal.minute):null;
+  const scorerSide=latestGoal?.side||null;
+  const scoreProtectSub=events.scoreProtectSub;
+  const scorerLeadingOrTied=scorerSide?(scorerSide==="home"?scoreDiff>=0:scoreDiff<=0):false;
+  const protectingSide=scoreProtectSub?scorerSide:null;
+  const favoriteOddsHome=num(odds.home),favoriteOddsAway=num(odds.away);
+  const favoriteWinSide=favoriteSide;
+  const sortedGoals=[...(events.goals||[])].sort((a,b)=>a.minute-b.minute);
+  let priorHome=0, priorAway=0;
+  for(const goal of sortedGoals.slice(0,-1)) { if(goal.side==="home") priorHome++; else if(goal.side==="away") priorAway++; }
+  const favoriteWasBehindBeforeLatest= favoriteWinSide==="home" ? priorHome<priorAway : favoriteWinSide==="away" ? priorAway<priorHome : false;
+  const favoriteDrawnFromBehind=!!favoriteWinSide && scorerSide===favoriteWinSide && favoriteWasBehindBeforeLatest && scoreDiff===0;
+  const postGoalWindow=latestGoal?clamp((minutesSinceGoal??0)/5*100):null;
+  const postGoalHomePressure=latestGoal?pressureAfterSub(live,"home",latestGoal.minute):null;
+  const postGoalAwayPressure=latestGoal?pressureAfterSub(live,"away",latestGoal.minute):null;
+  const scorerSubMinute=events.afterGoalSubs.length?Math.max(...events.afterGoalSubs.map(v=>v.minute)):null;
+  const scorerPostSubPressure=scorerSide&&scorerSubMinute!=null?pressureAfterSub(live,scorerSide,scorerSubMinute):null;
+  const scoreProtectionScore=scoreProtectSub?clamp(78-(scorerPostSubPressure??35)*0.35):50;
+  const afterGoal=live.periods?.afterGoal||{}, afterRed=live.periods?.afterRed||{}, afterHalf=live.periods?.afterHalf||{};
+  const pg=afterGoal.metrics||{}, pr=afterRed.metrics||{}, ph=afterHalf.metrics||{};
+  const afterGoalHomeShots=num(pg.shots_home), afterGoalAwayShots=num(pg.shots_away);
+  const afterRedHomeShots=num(pr.shots_home), afterRedAwayShots=num(pr.shots_away);
+  const latestRedMinute=live.periods?.afterRed?.fromMinute??null;
+  const redTransition=latestRedMinute!=null && minute-latestRedMinute>=0 && minute-latestRedMinute<5;
+  const liveOdds=live.liveOdds||null;
+  const live25=liveOdds?.lines?.['2.5']||null, live35=liveOdds?.lines?.['3.5']||null, live45=liveOdds?.lines?.['4.5']||null;
+  const live25Prob=live25?.over>1&&live25?.under>1?(1/live25.over)/((1/live25.over)+(1/live25.under)):null;
+  const redAdvHome=events.red.away>events.red.home, redAdvAway=events.red.home>events.red.away;
+  // Next-goal side is withheld unless both teams have enough observed live evidence.
+  const homeInside=metric(w10,"inside","home"), awayInside=metric(w10,"inside","away");
+  const homeSot=metric(w10,"sot","home"), awaySot=metric(w10,"sot","away");
+  const homeXg=metric(w10,"xg","home"), awayXg=metric(w10,"xg","away");
+  const homeShots=metric(w10,"shots","home"), awayShots=metric(w10,"shots","away");
+  const evidence=(vals)=>vals.filter(v=>v!=null).length;
+  const homeEvidence=evidence([homeInside,homeSot,homeXg,homeShots]);
+  const awayEvidence=evidence([awayInside,awaySot,awayXg,awayShots]);
+  const nextGoalHomeRaw=(homeInside??0)*3.2+(homeSot??0)*2.4+(homeXg??0)*20+(homeShots??0)*0.35+(postGoalHomePressure??0)*0.10+(afterGoalHomeShots??0)*0.8+(afterRedHomeShots??0)*0.6+(redAdvHome?2:0);
+  const nextGoalAwayRaw=(awayInside??0)*3.2+(awaySot??0)*2.4+(awayXg??0)*20+(awayShots??0)*0.35+(postGoalAwayPressure??0)*0.10+(afterGoalAwayShots??0)*0.8+(afterRedAwayShots??0)*0.6+(redAdvAway?2:0);
+  const nextGoalMargin=Math.abs(nextGoalHomeRaw-nextGoalAwayRaw);
+  const nextGoalDataReady=!!w10 && w10.ready && homeEvidence>=2 && awayEvidence>=2 && (homeShots!=null||awayShots!=null||homeInside!=null||awayInside!=null);
+  const nextGoalSide=nextGoalDataReady && nextGoalMargin>=6 ? (nextGoalHomeRaw>nextGoalAwayRaw?"home":"away") : null;
+  const nextGoalSideLabel=nextGoalSide==="home"?match.home:nextGoalSide==="away"?match.away:"Belirsiz";
   const parts=[
     {key:"live",label:"Canlı hücum baskısı",value:liveScore,weight:30},
     {key:"odds",label:"Maç önü oranları",value:oddsScore,weight:15},
@@ -108,17 +184,20 @@ export function scoreGoalContext(match, context={}, live={}) {
     {key:"subs",label:"Gerideyken 60+ değişiklik",value:trailingSubCount?subScore:50,weight:5},
     {key:"late",label:"Son 15 dk gol yeme eğilimi",value:lateScore,weight:10},
     {key:"game",label:"Dakika ve skor durumu",value:gameScore,weight:5},
+    {key:"scoreProtection",label:"Gol sonrası skor koruma davranışı",value:scoreProtectSub?scoreProtectionScore:50,weight:5},
     {key:"scoreSurplus",label:"Skorun gol ortalamasını aşması",value:scoreState,weight:5},
+    {key:"afterGoal",label:"Gol sonrası yeni dönem baskısı",value:afterGoalHomeShots==null&&afterGoalAwayShots==null?null:clamp(((afterGoalHomeShots||0)+(afterGoalAwayShots||0))/6*100),weight:5},
+    {key:"afterRed",label:"Kırmızı kart sonrası yeni dönem baskısı",value:afterRedHomeShots==null&&afterRedAwayShots==null?null:clamp(((afterRedHomeShots||0)+(afterRedAwayShots||0))/6*100),weight:3},
   ];
   const available=parts.filter(p=>p.value!=null),weight=available.reduce((s,p)=>s+p.weight,0);
   let score=weight?Math.round(available.reduce((s,p)=>s+p.value*p.weight,0)/weight):null;
   const coverage=Math.round(weight),level=score==null?"Veri bekleniyor":score>=75?"Yüksek gol sinyali":score>=60?"Gol eğilimi":score>=40?"Orta":"Düşük";
   const signal=score!=null&&score>=75&&liveScore!=null&&liveScore>=55&&coverage>=60;
-  return {ready:score!=null,score,level,signal,coverage,livePressure:liveScore,probability:null,probabilityLabel:"Model henüz kalibre edilmedi",expectedGoals:expectedGoals==null?null:+expectedGoals.toFixed(2),preOdds:context.preOdds||null,over25Probability:overProb==null?null:+overProb.toFixed(3),components:parts.map(p=>({...p,value:p.value==null?null:Math.round(p.value)})),features:{insideShots:inside,outsideShots:outside,insideRatio,outsideRatio:insideRatio==null?null:1-insideRatio,fouls,foulPenalty,outsidePenalty,redHome:events.red.home,redAway:events.red.away,trailingSide,trailingSubCount,postSubPressure,lateConceded:lateConcede,totalGoals,goalSurplus,scoreSurplusPenalty,favoriteSide,favoriteTrailing:!!favoriteTrailing,favoriteLeadingByTwo:!!favoriteLeadingByTwo,leadingFavoritePenalty,trailingFavoriteBoost},context:{homeRank:num(ht?.rank),awayRank:num(at?.rank),homePoints:num(ht?.points),awayPoints:num(at?.points),homeForm:ht?.form||null,awayForm:at?.form||null,homeScored:home?.scored??null,homeConceded:home?.conceded??null,awayScored:away?.scored??null,awayConceded:away?.conceded??null,homeLateConceded:home?.lateConceded??null,awayLateConceded:away?.lateConceded??null}};
+  return {ready:score!=null,score,level,signal,coverage,livePressure:liveScore,probability:null,probabilityLabel:"Model henüz kalibre edilmedi",expectedGoals:expectedGoals==null?null:+expectedGoals.toFixed(2),preOdds:context.preOdds||null,over25Probability:overProb==null?null:+overProb.toFixed(3),liveOdds,liveOddsLines:liveOdds?.lines||null,liveOddsImplied25:live25Prob,components:parts.map(p=>({...p,value:p.value==null?null:Math.round(p.value)})),features:{insideShots:inside,outsideShots:outside,insideRatio,outsideRatio:insideRatio==null?null:1-insideRatio,fouls,foulPenalty,outsidePenalty,redHome:events.red.home,redAway:events.red.away,trailingSide,trailingSubCount,postSubPressure,lateConceded:lateConcede,homeLateConcededRate:homeLateRate,awayLateConcededRate:awayLateRate,totalGoals,goalSurplus,scoreSurplusPenalty,favoriteSide,favoriteGap,homeFairWinProbability:fairProb?+fairProb[0].toFixed(4):null,awayFairWinProbability:fairProb?+fairProb[2].toFixed(4):null,favoriteTrailing:!!favoriteTrailing,favoriteLeadingByTwo:!!favoriteLeadingByTwo,leadingFavoritePenalty,trailingFavoriteBoost,latestGoalMinute:latestGoal?.minute??null,latestGoalSide:scorerSide,minutesSinceGoal,scoreProtectSub,protectingSide,favoriteDrawnFromBehind,afterGoalSubCount:events.afterGoalSubs.length,scoreProtectionScore,scorerPostSubPressure,postGoalHomePressure,postGoalAwayPressure,leadingSide:events.leadingSide,redCardsHome:events.red.home,redCardsAway:events.red.away,afterGoalPeriodFrom:live.periods?.afterGoal?.fromMinute??null,afterGoalHomeShots,afterGoalAwayShots,afterRedPeriodFrom:live.periods?.afterRed?.fromMinute??null,afterRedHomeShots,afterRedAwayShots,redTransition,latestRedMinute,afterHalfHomeShots:num(ph.shots_home),afterHalfAwayShots:num(ph.shots_away),live25Over:live25?.over??null,live25Under:live25?.under??null,live35Over:live35?.over??null,live35Under:live35?.under??null,live45Over:live45?.over??null,live45Under:live45?.under??null,live25Prob},nextGoal:{side:nextGoalSide,label:nextGoalSideLabel,homeScore:Math.round(nextGoalHomeRaw),awayScore:Math.round(nextGoalAwayRaw),margin:+nextGoalMargin.toFixed(2),dataReady:nextGoalDataReady,homeEvidence,awayEvidence,reason:!nextGoalDataReady?"İki takım için yeterli canlı veri yok":nextGoalSide?"Canlı hücum göstergelerinde anlamlı fark var":"Takımlar arasındaki canlı veri farkı yeterli değil"},context:{homeRank:num(ht?.rank),awayRank:num(at?.rank),homePoints:num(ht?.points),awayPoints:num(at?.points),homeForm:ht?.form||null,awayForm:at?.form||null,homeScored:home?.scored??null,homeConceded:home?.conceded??null,awayScored:away?.scored??null,awayConceded:away?.conceded??null,homeLateConceded:home?.lateConceded??null,awayLateConceded:away?.lateConceded??null}};
 }
 export function trainingVector(p) {
   const f=p?.features||{};
-  const vals=[(p?.livePressure??0)/100,p?.over25Probability??.5,(p?.expectedGoals??1.8)/4,(p?.components?.find(x=>x.key==="form")?.value??50)/100,(p?.components?.find(x=>x.key==="game")?.value??50)/100,(p?.coverage??0)/100,(f.insideShots??0)/6,(f.outsideRatio ?? (f.insideRatio == null ? 0.5 : 1 - f.insideRatio)),(f.fouls??0)/10,(f.lateConceded??0)/3,((f.redHome??0)-(f.redAway??0)+2)/4,(f.trailingSubCount??0)/2,(f.postSubPressure??0)/100,(f.totalGoals??0)/7,(f.goalSurplus??0)/4,(f.scoreSurplusPenalty??0)/32,(f.favoriteTrailing?1:0),(f.favoriteLeadingByTwo?1:0)];
+  const vals=[(p?.livePressure??0)/100,p?.over25Probability??.5,(p?.expectedGoals??1.8)/4,(p?.components?.find(x=>x.key==="form")?.value??50)/100,(p?.components?.find(x=>x.key==="game")?.value??50)/100,(p?.coverage??0)/100,(f.insideShots??0)/6,(f.outsideRatio ?? (f.insideRatio == null ? 0.5 : 1 - f.insideRatio)),(f.fouls??0)/10,(f.lateConceded??0)/3,((f.redHome??0)-(f.redAway??0)+2)/4,(f.trailingSubCount??0)/2,(f.postSubPressure??0)/100,(f.totalGoals??0)/7,(f.goalSurplus??0)/4,(f.scoreSurplusPenalty??0)/32,(f.favoriteTrailing?1:0),(f.favoriteLeadingByTwo?1:0),(f.scoreProtectSub?1:0),(f.favoriteDrawnFromBehind?1:0),(f.afterGoalSubCount??0)/3,(f.minutesSinceGoal??10)/10,(f.leadingSide==="home"?1:f.leadingSide==="away"?0.5:0),(f.postGoalHomePressure??0)/100,(f.postGoalAwayPressure??0)/100,(f.afterGoalHomeShots??0)/10,(f.afterGoalAwayShots??0)/10,(f.afterRedHomeShots??0)/10,(f.afterRedAwayShots??0)/10,(f.live25Prob??p?.over25Probability??0.5),(f.scoreProtectSub?1:0),(f.redTransition?1:0)];
   return vals.map(v=>Math.max(0,Math.min(1,Number(v)||0)));
 }
 const sigmoid=z=>1/(1+Math.exp(-Math.max(-30,Math.min(30,z))));
@@ -132,3 +211,10 @@ export function trainLogistic(samples,oldWeights=null) {
   return {weights:w,samples:valid.length,positives,trainedAt:Date.now(),features:dim};
 }
 export function predictTrainedProbability(vector,weights){if(!Array.isArray(weights)||weights.length!==vector?.length+1)return null;return sigmoid(weights[0]+vector.reduce((sum,v,i)=>sum+v*weights[i+1],0));}
+
+// Gol alarmı yalnızca normal sürenin ilk 81 dakikasında gönderilir.
+export function canSendGoalAlert(statusShort, elapsedMinute) {
+  const running = new Set(["1H", "2H", "LIVE"]);
+  const minute = Number(elapsedMinute);
+  return running.has(String(statusShort || "")) && Number.isFinite(minute) && minute >= 0 && minute <= 81;
+}

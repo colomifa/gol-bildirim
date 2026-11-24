@@ -2,7 +2,7 @@ import express from "express";
 import fs from "fs";
 import path from "path";
 import { findTriggered, formatAlert, condsMatch, toMetrics, pkey } from "./rules.mjs";
-import { scoreGoalContext, trainingVector, trainLogistic, predictTrainedProbability } from "./goal-model.mjs";
+import { scoreGoalContext, trainingVector, trainLogistic, predictTrainedProbability, canSendGoalAlert } from "./goal-model.mjs";
 
 const env = process.env;
 const { BOT_TOKEN, CHAT_ID, PANEL_PASSWORD, API_KEY, DATA_DIR = ".", TIMEZONE = "Europe/Istanbul", BOOKMAKER_ID = "8" } = env;
@@ -12,6 +12,9 @@ const STATS = 60;                // istatistik güncelleme kontrolü: 60 saniye
 const STATS_BATCH_SIZE = 20;    // /fixtures?ids= tek istekte en fazla 20 maç
 const FINAL_CHECK = 60;           // bildirimli maçların canlı skorunu dakikada bir senkronize et
 const REQUIRE_XG = true; // xG verisi olmayan maçlarda hiçbir bildirim gönderilmez.
+// İlk 7 gün başlangıç performansı ölçülür; mevcut model ağırlıkları kullanılabilir ancak yeniden eğitim yapılmaz.
+const BASELINE_MODE = env.BASELINE_MODE !== "false";
+const BASELINE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 const LEAGUES = (env.LEAGUE_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
 
 if (!BOT_TOKEN || !CHAT_ID || !PANEL_PASSWORD) {
@@ -27,6 +30,7 @@ const SETTINGS_FILE = path.join(DATA_DIR, "settings.json");
 const NOTIFICATIONS_FILE = path.join(DATA_DIR, "notifications.json");
 const PROFILES_FILE = path.join(DATA_DIR, "goal-profiles.json");
 const MODEL_FILE = path.join(DATA_DIR, "goal-model.json");
+const MATCH_STATE_FILE = path.join(DATA_DIR, "goal-match-state.json");
 const loadRules = () => { try { return JSON.parse(fs.readFileSync(RULES_FILE, "utf8")).rules || []; } catch { return []; } };
 const saveRules = (rules) => fs.writeFileSync(RULES_FILE, JSON.stringify({ rules }, null, 2));
 
@@ -156,6 +160,43 @@ function oddsSet(bets, live) {
   return Object.values(o).some((v) => v) ? o : null;
 }
 
+// Canlı oranlar /odds/live endpoint'inden gelir; pre-match odds ile karıştırılmaz.
+function parseLiveOdds(response) {
+  const root = response?.[0] || {};
+  const groups = [];
+  if (Array.isArray(root.odds)) groups.push(...root.odds);
+  for (const b of (root.bookmakers || [])) groups.push(...(b.bets || []));
+  const out = { lines: {}, updatedAt: Date.now(), bookmaker: root.bookmaker?.name || null };
+  for (const bet of groups) {
+    const name = String(bet.name || '').toLowerCase();
+    if (!/over\s*\/\s*under|over\/under|total goals|goals over/.test(name)) continue;
+    for (const v of bet.values || []) {
+      if (v.suspended) continue;
+      const raw = v.handicap ?? v.value;
+      const lineMatch = String(raw ?? '').match(/(2\.5|3\.5|4\.5)/);
+      if (!lineMatch) continue;
+      const line = lineMatch[1];
+      const side = String(v.value || '').toLowerCase();
+      const key = side.startsWith('over') ? 'over' : side.startsWith('under') ? 'under' : null;
+      const odd = Number(v.odd);
+      if (key && Number.isFinite(odd) && odd > 1) {
+        out.lines[line] ||= {};
+        if (out.lines[line][key] == null || v.main === true) out.lines[line][key] = odd;
+      }
+    }
+  }
+  const any = Object.values(out.lines).some(v => v.over || v.under);
+  return any ? out : null;
+}
+function liveOddsImplied(odds, line='2.5') {
+  const v=odds?.lines?.[line]; if(!v?.over||!v?.under) return null;
+  const a=1/v.over,b=1/v.under; return a/(a+b);
+}
+async function fetchLiveOdds(fixtureId) {
+  const r=await api(`/odds/live?fixture=${fixtureId}`);
+  return parseLiveOdds(r);
+}
+
 // ---------- İstatistik ayrıştırma (tüm maç / 1. yarı / 2. yarı) ----------
 const FIELDS = [["shots", "Total Shots"], ["sot", "Shots on Goal"], ["xg", "expected_goals"], ["red", "Red Cards"]];
 const emptyBlock = () => ({ shots: {}, sot: {}, xg: {}, red: {} });
@@ -229,6 +270,46 @@ const KEYS = [["shots", "shots"], ["shotsOnTarget", "sot"], ["xg", "xg"], ["red"
 const emptyWin = () => ({ shots: {}, shotsOnTarget: {}, xg: {}, red: {} });
 const histAt = (hist, minute) => { let b = null; for (const h of hist || []) { if (h.minute <= minute) b = h.all; else break; } return b; };
 const histEntryAt = (hist, minute) => { let b = null; for (const h of hist || []) { if (h.minute <= minute) b = h; else break; } return b; };
+
+// Gol/kırmızı kart/devre olaylarında yeni dönem başlatılır; geçmiş ve kayan pencereler silinmez.
+function syncEventPeriods(x, m) {
+  x.eventPeriods ||= [];
+  const events = x.events || [];
+  const seen = new Set(x.eventPeriods.map(p => `${p.kind}:${p.minute}:${p.side || ''}`));
+  const add = (kind, minute, side=null) => {
+    const key=`${kind}:${minute}:${side || ''}`; if(seen.has(key)) return;
+    const base=histEntryAt(x.hist, Math.max(0, Number(minute)||0));
+    x.eventPeriods.push({kind, minute:Number(minute)||0, side, baselineRows:base?.rows || null, baselineFound:!!base, createdAt:Date.now()});
+    seen.add(key);
+  };
+  for(const e of events) {
+    const type=String(e.type||'').toLowerCase(), detail=String(e.detail||'').toLowerCase();
+    let side=e.team?.id===m.homeId?'home':e.team?.id===m.awayId?'away':null;
+    const minute=Number(e.time?.elapsed)||0; if(!side||!minute) continue;
+    if(type==='goal' && /own/.test(detail)) side=side==='home'?'away':'home';
+    if(type==='goal' && !/missed|cancel/.test(detail)) add('goal',minute,side);
+    if(type==='card' && /red card|second yellow/.test(detail)) add('red',minute,side);
+  }
+  if(m.short==='HT') add('halftime',45,null);
+  if(m.short==='2H' && !x.eventPeriods.some(p=>p.kind==='halftime')) add('halftime',45,null);
+  x.eventPeriods.sort((a,b)=>a.minute-b.minute || a.kind.localeCompare(b.kind));
+  if(x.eventPeriods.length>80) x.eventPeriods=x.eventPeriods.slice(-80);
+}
+function eventPeriodMetrics(x, m) {
+  const periods=x.eventPeriods||[], current=x.stats?.lists?.all||{};
+  const latest=(kind)=>[...periods].reverse().find(p=>p.kind===kind);
+  const delta=(period)=>{
+    if(!period?.baselineRows) return {ready:false,fromMinute:period?.minute??null,metrics:{}};
+    const names={shots:['Total Shots','Total shots'],sot:['Shots on Goal','Shots on Target'],inside:['Shots insidebox','Shots Inside Box'],outside:['Shots outsidebox','Shots Outside Box'],xg:['expected_goals','xg','Expected Goals'],fouls:['Fouls','Foul'],corners:['Corner Kicks','Corners']};
+    const metrics={};
+    for(const [k,aliases] of Object.entries(names)) for(const side of ['home','away']) {
+      const now=statValue(current[side],aliases),old=statValue(period.baselineRows?.[side],aliases);
+      metrics[`${k}_${side}`]=now==null||old==null?null:Math.max(0,+(now-old).toFixed(3));
+    }
+    return {ready:true,fromMinute:period.minute,kind:period.kind,side:period.side,metrics};
+  };
+  return {afterGoal:delta(latest('goal')),afterRed:delta(latest('red')),afterHalf:delta(latest('halftime')),periodCount:periods.length,latestEvent:periods.at(-1)||null};
+}
 
 function last10Rows(x, m) {
   const S = x.stats;
@@ -396,6 +477,22 @@ function needs(rules, m) {
 let schedule = [], scheduleDate = "", liveMap = new Map();
 let finalCheckAt = 0, finalCursor = 0;
 const extra = new Map();
+// Canlı maçların geçmiş istatistik snapshotları ve olay dönemleri restart sonrası da korunsun.
+try {
+  const saved = JSON.parse(fs.readFileSync(MATCH_STATE_FILE, "utf8"));
+  for (const [id, value] of Object.entries(saved || {})) extra.set(Number(id), value);
+} catch {}
+function saveMatchState() {
+  try {
+    const out = {};
+    for (const [id, x] of extra.entries()) out[id] = {
+      hist: x.hist || [], goals: x.goals || [], events: x.events || [], eventPeriods: x.eventPeriods || [],
+      evTotal: x.evTotal ?? null, eventsAt: x.eventsAt ?? 0, lastModelSampleMinute: x.lastModelSampleMinute ?? null,
+      liveOdds: x.liveOdds || null, liveOddsAt: x.liveOddsAt ?? 0,
+    };
+    fs.writeFileSync(MATCH_STATE_FILE, JSON.stringify(out));
+  } catch (e) { console.error("Maç dönem geçmişi kaydedilemedi:", e.message); }
+}
 let cache = { matches: [], updated: null, error: "" };
 let lastLog = "", polling = false;
 
@@ -403,10 +500,17 @@ let lastLog = "", polling = false;
 let profileStore = { standings: {}, teams: {} };
 try { const p = JSON.parse(fs.readFileSync(PROFILES_FILE, "utf8")); profileStore = { standings: p.standings || {}, teams: p.teams || {} }; } catch {}
 const saveProfiles = () => { try { fs.writeFileSync(PROFILES_FILE, JSON.stringify(profileStore)); } catch (e) { console.error("Gol profilleri yazılamadı:", e.message); } };
-let modelStore = { samples: [], weights: null, trainedAt: null, trainedCount: 0, sentSignals: {}, newLabels: 0 };
+let modelStore = { samples: [], weights: null, trainedAt: null, trainedCount: 0, sentSignals: {}, newLabels: 0, baselineStartedAt: null };
 try { const p = JSON.parse(fs.readFileSync(MODEL_FILE, "utf8")); modelStore = { ...modelStore, ...p }; } catch {}
 if (!Array.isArray(modelStore.samples)) modelStore.samples = [];
 if (!modelStore.sentSignals || typeof modelStore.sentSignals !== "object") modelStore.sentSignals = {};
+if (!modelStore.baselineStartedAt) { modelStore.baselineStartedAt = Date.now(); try { fs.writeFileSync(MODEL_FILE, JSON.stringify(modelStore)); } catch (e) { console.error("Başlangıç ölçüm tarihi kaydedilemedi:", e.message); } }
+// V5 ağırlıkları V6'nın 32 özellikli vektörüyle uyumlu değildir; yalnızca V6 ağırlığı yüklenir.
+if (Array.isArray(modelStore.weights) && modelStore.weights.length !== 33) {
+  modelStore.weights = null;
+  modelStore.trainedAt = null;
+  modelStore.trainedCount = 0;
+}
 const saveModel = () => { try { fs.writeFileSync(MODEL_FILE, JSON.stringify(modelStore)); } catch (e) { console.error("Gol modeli yazılamadı:", e.message); } };
 const PROFILE_STALE = 12 * 60 * 60 * 1000;
 const STANDINGS_STALE = 60 * 60 * 1000;
@@ -429,7 +533,7 @@ function addNotification(m, rule, minute, sentAt) {
   saveNotifications();
 }
 
-function addGoalSignalNotification(m, prediction, sentAt, goalMinutes = []) {
+function addGoalSignalNotification(m, prediction, sentAt, goalMinutes = [], liveOdds = null) {
   notifications.push({
     id: `goal-${m.id}-${sentAt}`,
     fixtureId: String(m.id), home: m.home, away: m.away,
@@ -441,6 +545,10 @@ function addGoalSignalNotification(m, prediction, sentAt, goalMinutes = []) {
     currentMinute: Number(m.minute) || 0, status: m.short || "LIVE",
     goalMinutes: Array.isArray(goalMinutes) ? goalMinutes.map(g => Number(g.minute)).filter(Number.isFinite) : [],
     signalScore: prediction.score, probability: prediction.probability ?? null,
+    liveOdds: liveOdds || null, liveOddsImplied25: liveOddsImplied(liveOdds, '2.5'),
+    likelyNextGoalSide: prediction.nextGoal?.side ?? null,
+    likelyNextGoalLabel: prediction.nextGoal?.label ?? null,
+    predictionFeatures: prediction.features || {},
     signalReason: (prediction.components || []).filter(c => c.value != null).sort((a,b) => (b.value*b.weight)-(a.value*a.weight)).slice(0,3).map(c => c.label),
     finalScore: null, finalStatus: null, finishedAt: null,
   });
@@ -469,7 +577,11 @@ function syncNotificationLiveState() {
 }
 
 async function updateFinalScores() {
-  const pending = [...new Set(notifications.filter((n) => !n.finalScore).map((n) => String(n.fixtureId)))];
+  const unresolvedSamples = modelStore.samples.filter(v => v.y === null && v.fixtureId && v.targetMinute != null);
+  const pending = [...new Set([
+    ...notifications.filter((n) => !n.finalScore).map((n) => String(n.fixtureId)),
+    ...unresolvedSamples.map(v => String(v.fixtureId)),
+  ])];
   if (!pending.length) return;
   const start = finalCursor % pending.length;
   const ids = pending.length <= 20 ? pending : pending.slice(start, start + 20);
@@ -488,6 +600,25 @@ async function updateFinalScores() {
         n.finishedAt = Date.now();
         changed = true;
       }
+      // Maç bittikten sonra hâlâ etiketsiz kalan başlangıç ölçümü örneklerini
+      // maç olaylarından kesin gol dakikalarıyla tamamla.
+      const waiting = modelStore.samples.filter(v => String(v.fixtureId) === id && v.y === null);
+      if (waiting.length) {
+        try {
+          const eventRows = await api(`/fixtures/events?fixture=${id}`);
+          const goalMinutes = (eventRows || [])
+            .filter(e => e.type === "Goal" && !/missed|cancel/i.test(e.detail || ""))
+            .map(e => Number(e.time?.elapsed ?? 0))
+            .filter(Number.isFinite);
+          for (const sample of waiting) {
+            sample.y = goalMinutes.some(minute => minute > Number(sample.minute) && minute <= Number(sample.targetMinute)) ? 1 : 0;
+            sample.labelledAt = Date.now();
+            sample.labelSource = "final-fixture-events";
+            modelStore.newLabels = (modelStore.newLabels || 0) + 1;
+          }
+          changed = true;
+        } catch (e) { console.warn("Ölçüm örneği maç sonu etiketlenemedi:", id, e.message); }
+      }
       // Günlük fikstür kaydını da final skorla güncelle.
       const sm = schedule.find((m) => String(m.id) === id);
       if (sm) {
@@ -495,7 +626,7 @@ async function updateFinalScores() {
         sm.short = status; sm.status = TR[status] || status; sm.inPlay = false;
       }
   }
-  if (changed) saveNotifications();
+  if (changed) { saveNotifications(); saveModel(); }
 }
 
 function flattenStandings(response) {
@@ -526,7 +657,7 @@ function updateTraining(m, x, prediction, now) {
     changed = true;
     modelStore.newLabels = (modelStore.newLabels || 0) + 1;
   }
-  const previousSamples = modelStore.samples.filter((v) => String(v.fixtureId) === String(m.id));
+  const previousSamples = modelStore.samples.filter((v) => String(v.fixtureId) === String(m.id) && v.version === 6 && Array.isArray(v.x) && v.x.length === 32);
   const lastStoredMinute = previousSamples.length ? Math.max(...previousSamples.map((v) => Number(v.minute) || 0)) : -100;
   const last = Math.max(Number(x.lastModelSampleMinute ?? -100), lastStoredMinute);
   const latestGoalMinute = Array.isArray(x.goals) && x.goals.length ? Math.max(...x.goals.map(g => Number(g.minute) || 0)) : 0;
@@ -534,21 +665,32 @@ function updateTraining(m, x, prediction, now) {
   const sampleGap = goalJustScored ? 5 : 10;
   const targetGap = goalJustScored ? 5 : 10;
   if (Number(m.minute) >= 5 && Number(m.minute) - last >= sampleGap && prediction?.ready && prediction.livePressure != null && prediction.coverage >= 60) {
+    const currentGoalCount = Array.isArray(x.goals) ? x.goals.length : totalGoals;
+    const signalKey = `${m.id}:${currentGoalCount}`;
+    const latestForDecision = Array.isArray(x.goals) && x.goals.length ? Math.max(...x.goals.map(g => Number(g.minute) || 0)) : 0;
+    const afterGoalSettledForDecision = !latestForDecision || Number(m.minute) - latestForDecision >= 2;
+    const decisionEligible = canSendGoalAlert(m.short, m.minute);
+    const decisionWouldAlert = !!prediction.signal && decisionEligible && afterGoalSettledForDecision && !modelStore.sentSignals[signalKey];
     modelStore.samples.push({
-      version: 4, fixtureId: String(m.id), minute: Number(m.minute), targetMinute: Number(m.minute) + targetGap,
-      scoreAt: totalGoals, goalCountAt: Array.isArray(x.goals) ? x.goals.length : totalGoals,
+      version: 6, phase: BASELINE_MODE ? "baseline-7d" : "normal", fixtureId: String(m.id),
+      home: m.home, away: m.away, league: m.league || "", minute: Number(m.minute), targetMinute: Number(m.minute) + targetGap,
+      scoreAt: totalGoals, goalCountAt: currentGoalCount,
+      decisionSignal: !!prediction.signal, decisionEligible, decisionWouldAlert,
+      modelScore: prediction.score ?? null, livePressure: prediction.livePressure ?? null, coverage: prediction.coverage ?? null,
       x: trainingVector(prediction), y: null, createdAt: now, windowMinutes: targetGap,
     });
     x.lastModelSampleMinute = Number(m.minute);
     changed = true;
   }
   if (modelStore.samples.length > 30000) modelStore.samples = modelStore.samples.slice(-30000);
-  const labelledRows = modelStore.samples.filter((v) => Array.isArray(v.x) && v.x.length === 18 && (v.y === 0 || v.y === 1));
+  const labelledRows = modelStore.samples.filter((v) => Array.isArray(v.x) && v.x.length === 32 && (v.y === 0 || v.y === 1));
   const labelled = labelledRows.length;
   const positives = labelledRows.filter((v) => v.y === 1).length;
   const negatives = labelled - positives;
-  if (labelled >= 250 && positives >= 25 && negatives >= 50 && ((modelStore.newLabels || 0) >= 50 || !modelStore.weights)) {
-    const trained = trainLogistic(modelStore.samples, modelStore.weights);
+  if (!BASELINE_MODE && labelled >= 250 && positives >= 25 && negatives >= 50 && ((modelStore.newLabels || 0) >= 50 || !modelStore.weights)) {
+    const compatibleSamples = modelStore.samples.filter(v => Array.isArray(v.x) && v.x.length === 32);
+    const compatibleWeights = Array.isArray(modelStore.weights) && modelStore.weights.length === 33 ? modelStore.weights : null;
+    const trained = trainLogistic(compatibleSamples, compatibleWeights);
     if (trained) {
       modelStore.weights = trained.weights;
       modelStore.trainedAt = trained.trainedAt;
@@ -562,10 +704,14 @@ function updateTraining(m, x, prediction, now) {
     prediction.probability = probability == null ? null : Math.round(probability * 100);
     prediction.probabilityLabel = probability == null ? "Model henüz eğitilmedi" : "Geçmiş örneklerle eğitilmiş deneysel tahmin";
   }
+  const baselineSamples = modelStore.samples.filter(v => v.phase === "baseline-7d");
   prediction.training = {
-    labelledSamples: modelStore.samples.filter((v) => Array.isArray(v.x) && v.x.length === 18 && (v.y === 0 || v.y === 1)).length,
+    labelledSamples: modelStore.samples.filter((v) => Array.isArray(v.x) && v.x.length === 32 && (v.y === 0 || v.y === 1)).length,
     pendingSamples: modelStore.samples.filter((v) => v.y === null).length,
     trainedSamples: modelStore.trainedCount || 0,
+    baselineMode: BASELINE_MODE,
+    baselineSamples: baselineSamples.length,
+    baselineLabelled: baselineSamples.filter(v => v.y === 0 || v.y === 1).length,
   };
   if (changed) saveModel();
 }
@@ -726,7 +872,7 @@ async function poll() {
       const x = extra.get(m.id) || {};
       const S = x.stats;
       const relevant = rules.filter((r) => !r.matchId || String(r.matchId) === String(m.id));
-      if (!relevant.length) continue;
+      if (!relevant.length || !canSendGoalAlert(m.short, m.minute)) continue;
       const homeXg = S?.all?.xg?.home;
       const awayXg = S?.all?.xg?.away;
       const homeHasXg = homeXg !== null && homeXg !== undefined && Number.isFinite(Number(homeXg));
@@ -738,7 +884,7 @@ async function poll() {
       }
       const winKeys = condInfo(relevant.flatMap((r) => r.conditions || [])).keys;
       const full = {
-        ...m, preOdds: x.pre || null, liveOdds: null,
+        ...m, preOdds: x.pre || null, liveOdds: x.liveOdds || null,
         shots: S?.all.shots, shotsOnTarget: S?.all.sot, xg: S?.all.xg, red: S?.all.red,
         win: buildWin(winKeys, m, x),
       };
@@ -771,35 +917,53 @@ async function poll() {
       const x = extra.get(m.id) || {};
       m.goalAnalysis = analyzeGoalWindows(x, m);
       const S = x.stats;
-      const prediction = scoreGoalContext({ ...m, red: S?.all?.red }, profileContext(m, x), { ...(m.goalAnalysis || {}), events: x.events || [], hist: x.hist || [], currentRows: S?.lists?.all || {} });
+      syncEventPeriods(x, m);
+      const periods = eventPeriodMetrics(x, m);
+      const prediction = scoreGoalContext({ ...m, red: S?.all?.red }, profileContext(m, x), { ...(m.goalAnalysis || {}), events: x.events || [], hist: x.hist || [], currentRows: S?.lists?.all || {}, periods, liveOdds: x.liveOdds || null });
       updateTraining(m, x, prediction, now);
       m.goalPrediction = prediction;
       const currentGoalCount = Array.isArray(x.goals) ? x.goals.length : ((Number(m.homeGoals)||0)+(Number(m.awayGoals)||0));
       const signalKey = `${m.id}:${currentGoalCount}`;
       const latestGoalMinute = Array.isArray(x.goals) && x.goals.length ? Math.max(...x.goals.map(g => Number(g.minute)||0)) : 0;
       const afterGoalSettled = !latestGoalMinute || Number(m.minute) - latestGoalMinute >= 2;
-      if (prediction.signal && afterGoalSettled && !modelStore.sentSignals[signalKey]) {
+      if (prediction.signal && canSendGoalAlert(m.short, m.minute) && afterGoalSettled && !modelStore.sentSignals[signalKey]) {
         await safe(async () => {
+          // Canlı oranı yalnızca gerçek sinyal anında sorgula; gereksiz API tüketimini önle.
+          if (!x.liveOdds || now - (x.liveOddsAt || 0) > 60000) {
+            x.liveOddsAt = now;
+            x.liveOdds = await fetchLiveOdds(m.id).catch(err => { console.warn('Canlı oran alınamadı:', err.message); return null; });
+          }
+          prediction.liveOdds = x.liveOdds || null;
+          prediction.liveOddsLines = x.liveOdds?.lines || null;
+          const live25 = x.liveOdds?.lines?.['2.5'];
+          const live35 = x.liveOdds?.lines?.['3.5'];
+          const live45 = x.liveOdds?.lines?.['4.5'];
           const lines = [
             `⚽ <b>OTOMATİK GOL SİNYALİ</b>`,
             `🏟 ${htmlSafe(m.home)} – ${htmlSafe(m.away)}`,
             `⏱ ${m.minute}' · Skor ${m.homeGoals}-${m.awayGoals}`,
             `🎯 Takip penceresi: Önümüzdeki 10 dakika`,
+            `⚽ Sonraki golü atmaya daha yakın taraf: ${htmlSafe(prediction.nextGoal?.label || "Belirsiz")}`,
+            `🧾 Sonraki gol tarafı gerekçesi: ${htmlSafe(prediction.nextGoal?.reason || "Canlı veri bekleniyor")} · Kanıt Ev ${prediction.nextGoal?.homeEvidence ?? 0}/4, Dep ${prediction.nextGoal?.awayEvidence ?? 0}/4 · Fark ${prediction.nextGoal?.margin ?? 0}`,
             `📊 Model puanı: <b>${prediction.score}/100</b> · Canlı baskı: ${prediction.livePressure}/100`,
             prediction.probability == null ? `🧪 Gerçek olasılık modeli: veri birikiyor` : `🎯 Deneysel 10 dk tahmini: <b>%${prediction.probability}</b>`,
             `📈 Maç önü oranları 1-X-2: ${prediction.preOdds?.home ?? "–"} / ${prediction.preOdds?.draw ?? "–"} / ${prediction.preOdds?.away ?? "–"}`,
             `📈 2.5 üst piyasa olasılığı: ${prediction.over25Probability == null ? "veri yok" : "%" + Math.round(prediction.over25Probability * 100)}`,
+            `📊 CANLI TOPLAM GOL ORANLARI (API varsa)`,
+            `2.5 Üst/Alt: ${live25?.over ?? "–"} / ${live25?.under ?? "–"} · Piyasa Üst olasılığı: ${liveOddsImplied(x.liveOdds,'2.5')==null?'veri yok':'%'+Math.round(liveOddsImplied(x.liveOdds,'2.5')*100)}`,
+            `3.5 Üst/Alt: ${live35?.over ?? "–"} / ${live35?.under ?? "–"} · 4.5 Üst/Alt: ${live45?.over ?? "–"} / ${live45?.under ?? "–"}`,
+            `🧭 Olay sonrası dönem: Gol ${prediction.features?.afterGoalPeriodFrom ?? "–"}' · Kırmızı kart ${prediction.features?.afterRedPeriodFrom ?? "–"}'`,
             `🏆 Sıralama: ${prediction.context.homeRank ?? "–"}. / ${prediction.context.awayRank ?? "–"}.`,
             `🏠 İç saha gol ort.: ${prediction.context.homeScored ?? "–"} · ✈️ Deplasman gol ort.: ${prediction.context.awayScored ?? "–"}`,
             `🎯 Ceza sahası içi/dışı şut: ${prediction.features.insideShots ?? "–"} / ${prediction.features.outsideShots ?? "–"}`,
             `🚩 Son 10 dk faul: ${prediction.features.fouls ?? "–"} · Tempo cezası: ${prediction.features.foulPenalty ?? 0}`,
             `🟥 Kırmızı kart: Ev ${prediction.features.redHome} / Dep ${prediction.features.redAway}`,
             `🔄 Gerideyken 60+ değişiklik: ${prediction.features.trailingSubCount ?? 0}`,
-            `⏳ Son 15 dk gol yeme verisi: Ev ${prediction.context.homeLateConceded ?? "–"} / Dep ${prediction.context.awayLateConceded ?? "–"}`,
+            `⏳ Sezon 76–90 dk gol yeme (maç başına): Ev ${prediction.context.homeLateConceded ?? "–"} / Dep ${prediction.context.awayLateConceded ?? "–"}`,
             `🔎 Veri kapsamı: %${prediction.coverage}`,
           ];
           await sendTelegram(lines.join("\n"));
-          addGoalSignalNotification(m, prediction, now, x.goals || []);
+          addGoalSignalNotification(m, prediction, now, x.goals || [], x.liveOdds || null);
           modelStore.sentSignals[signalKey] = now;
           saveModel();
           console.log("Gol sinyali gönderildi:", m.home, "-", m.away, prediction.score);
@@ -807,6 +971,7 @@ async function poll() {
       }
     }
     syncNotificationLiveState();
+    saveMatchState();
     cache = { matches: all, updated: now, error: warns[0] || "" };
     const log = `[poll] fikstür=${schedule.length} canlı=${liveMap.size} istatistik_maç=${statCandidates.length} istatistik_toplu_istek=${statsBatchCount} xG_verisi_yok=${xgBlocked} bildirim=${notifications.length} kalan_istek=${quota ?? "?"}`;
     if (log !== lastLog) { console.log(log); lastLog = log; }
@@ -843,6 +1008,48 @@ app.use(express.json());
 app.use(express.static("public"));
 
 const auth = (req, res, next) => (req.get("x-password") === PANEL_PASSWORD ? next() : res.status(401).end());
+
+// 7 günlük başlangıç ölçümü: alarm kararı ve 10 dakikalık sonuç etiketlerini özetler.
+app.get("/api/learning-baseline", auth, (req, res) => {
+  const started = Number(modelStore.baselineStartedAt) || Date.now();
+  const ends = started + BASELINE_DURATION_MS;
+  const rows = modelStore.samples.filter(v => v.phase === "baseline-7d");
+  const labelled = rows.filter(v => v.y === 0 || v.y === 1);
+  const alerted = labelled.filter(v => v.decisionWouldAlert);
+  const notAlerted = labelled.filter(v => !v.decisionWouldAlert);
+  const count = (arr, y) => arr.filter(v => v.y === y).length;
+  res.json({
+    mode: BASELINE_MODE ? "baseline" : "normal",
+    startedAt: started, endsAt: ends, elapsedMs: Math.max(0, Date.now() - started), remainingMs: Math.max(0, ends - Date.now()),
+    complete: Date.now() >= ends, sampleCount: rows.length, labelledCount: labelled.length,
+    pendingCount: rows.length - labelled.length,
+    alarmWindows: alerted.length, alarmThenGoal: count(alerted, 1), alarmNoGoal: count(alerted, 0),
+    noAlarmWindows: notAlerted.length, missedGoalWindows: count(notAlerted, 1), noAlarmNoGoal: count(notAlerted, 0),
+    note: "Sonuçlar örnekleme pencereleri içindir; aynı maçtan birden fazla pencere bulunabilir. Bu rapor tek başına model başarısı veya nedensellik kanıtı değildir."
+  });
+});
+
+// Ölçüm kartlarının ayrıntıları: dört sonuç grubunu tek tek inceleme.
+app.get("/api/learning-baseline/items", auth, (req, res) => {
+  const type = String(req.query.type || "");
+  const allowed = new Set(["correct", "false_alarm", "missed", "correct_reject"]);
+  if (!allowed.has(type)) return res.status(400).json({ error: "Geçersiz kategori" });
+  const rows = modelStore.samples.filter(v => v.phase === "baseline-7d" && (v.y === 0 || v.y === 1));
+  const selected = rows.filter(v => {
+    if (type === "correct") return !!v.decisionWouldAlert && v.y === 1;
+    if (type === "false_alarm") return !!v.decisionWouldAlert && v.y === 0;
+    if (type === "missed") return !v.decisionWouldAlert && v.y === 1;
+    return !v.decisionWouldAlert && v.y === 0;
+  }).sort((a,b) => Number(b.createdAt || 0) - Number(a.createdAt || 0));
+  res.json({ type, count: selected.length, items: selected.slice(0, 500).map(v => ({
+    fixtureId: v.fixtureId, home: v.home, away: v.away, league: v.league || "",
+    minute: v.minute, targetMinute: v.targetMinute, scoreAt: v.scoreAt,
+    decisionWouldAlert: !!v.decisionWouldAlert, decisionSignal: !!v.decisionSignal,
+    modelScore: v.modelScore, livePressure: v.livePressure, coverage: v.coverage,
+    result: v.y === 1 ? "Hedef pencerede gol oldu" : "Hedef pencerede gol olmadı",
+    createdAt: v.createdAt, labelledAt: v.labelledAt, windowMinutes: v.windowMinutes || 10
+  })) });
+});
 
 app.get("/api/rules", auth, (req, res) => res.json({ rules: loadRules() }));
 app.post("/api/rules", auth, (req, res) => {

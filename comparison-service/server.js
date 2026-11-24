@@ -225,40 +225,50 @@ app.get("/v1/live-notifications", async (_req, res) => {
   try {
     const q = await pool.query(`
       WITH live_notifications AS (
-        SELECT *
+        SELECT fixture_id, MAX(home) AS home, MAX(away) AS away,
+          MAX(minute) AS latest_notification_minute, MAX(notified_at) AS latest_notified_at,
+          jsonb_agg(jsonb_build_object(
+            'source', source, 'minute', minute, 'notified_at', notified_at,
+            'source_score', source_score, 'score_at', score_at, 'outcome', outcome
+          ) ORDER BY notified_at DESC) AS notifications,
+          COUNT(DISTINCT source)::int AS source_count
         FROM algorithm_goal_notifications
         WHERE UPPER(COALESCE(match_status, 'LIVE')) NOT IN ('FT','AET','PEN','AWD','WO')
+        GROUP BY fixture_id
       ),
       latest_scores AS (
         SELECT DISTINCT ON (source, fixture_id)
-          source, fixture_id, score, minute, home_goals, away_goals, captured_at
+          source, fixture_id, home, away, score, minute, match_status,
+          home_goals, away_goals, captured_at
         FROM algorithm_score_snapshots
         ORDER BY source, fixture_id, captured_at DESC
+      ),
+      active_fixtures AS (
+        SELECT DISTINCT fixture_id FROM latest_scores
+        WHERE UPPER(COALESCE(match_status, 'LIVE')) NOT IN ('FT','AET','PEN','AWD','WO')
+        UNION
+        SELECT fixture_id FROM live_notifications
       )
       SELECT
-        n.fixture_id,
-        MAX(n.home) AS home,
-        MAX(n.away) AS away,
-        MAX(n.minute) AS latest_notification_minute,
-        MAX(n.notified_at) AS latest_notified_at,
-        jsonb_agg(jsonb_build_object(
-          'source', n.source,
-          'minute', n.minute,
-          'notified_at', n.notified_at,
-          'source_score', n.source_score,
-          'score_at', n.score_at,
-          'outcome', n.outcome
-        ) ORDER BY n.notified_at DESC) AS notifications,
-        (SELECT jsonb_object_agg(s.source, jsonb_build_object(
-          'score', s.score, 'minute', s.minute,
-          'home_goals', s.home_goals, 'away_goals', s.away_goals,
-          'captured_at', s.captured_at
-        )) FROM latest_scores s WHERE s.fixture_id = n.fixture_id) AS scores,
-        (SELECT COUNT(DISTINCT n2.source)::int FROM live_notifications n2 WHERE n2.fixture_id=n.fixture_id) AS source_count
-      FROM live_notifications n
-      GROUP BY n.fixture_id
-      ORDER BY MAX(n.notified_at) DESC
-      LIMIT 200
+        f.fixture_id,
+        COALESCE(n.home, MAX(s.home)) AS home,
+        COALESCE(n.away, MAX(s.away)) AS away,
+        n.latest_notification_minute,
+        n.latest_notified_at,
+        COALESCE(n.notifications, '[]'::jsonb) AS notifications,
+        (SELECT jsonb_object_agg(x.source, jsonb_build_object(
+          'score', x.score, 'minute', x.minute,
+          'home_goals', x.home_goals, 'away_goals', x.away_goals,
+          'captured_at', x.captured_at
+        )) FROM latest_scores x WHERE x.fixture_id = f.fixture_id) AS scores,
+        COALESCE(n.source_count, 0) AS source_count
+      FROM active_fixtures f
+      LEFT JOIN live_notifications n ON n.fixture_id=f.fixture_id
+      LEFT JOIN latest_scores s ON s.fixture_id=f.fixture_id
+      GROUP BY f.fixture_id, n.home, n.away, n.latest_notification_minute,
+        n.latest_notified_at, n.notifications, n.source_count
+      ORDER BY n.latest_notified_at DESC NULLS LAST, f.fixture_id
+      LIMIT 500
     `);
     res.json({ ok: true, items: q.rows, sources: [...SOURCES] });
   } catch (e) {

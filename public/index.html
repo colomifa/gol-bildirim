@@ -172,6 +172,29 @@ main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
 .learn-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.learn-card{border:1px solid var(--line);border-radius:12px;background:var(--surface-2);padding:12px;text-align:left;color:var(--ink);cursor:pointer;min-width:0}.learn-card:active,.learn-card.on{border-color:var(--accent);background:var(--surface-3)}.learn-card small{display:block;color:var(--muted);font-size:11px;min-height:30px}.learn-card strong{display:block;font-size:24px;margin:5px 0}.learn-card em{display:block;color:var(--muted);font-size:10px;font-style:normal}.learn-note{color:var(--muted);font-size:11px;margin:10px 0 0}.learn-detail{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}.learn-detail h4{margin:0 0 10px}.learn-item{padding:10px 0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 12px}.learn-item b{font-size:13px}.learn-item small{display:block;color:var(--muted);font-size:11px}.learn-item span{font-size:12px;text-align:right}.learn-empty{color:var(--muted);font-size:13px;padding:12px 0}
 @media(max-width:700px){.learn-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.learn-box{padding:13px}.learn-item{grid-template-columns:minmax(0,1fr) auto}}
 
+
+/* Üç algoritmanın devam eden maç bildirimleri */
+.cmp-live{border:1px solid rgba(255,94,114,.28);background:linear-gradient(145deg,rgba(31,24,35,.96),rgba(13,22,35,.98));border-radius:16px;padding:16px;margin:0 0 20px}
+.cmp-live-head{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-bottom:12px;flex-wrap:wrap}
+.cmp-live-head h3{font-size:16px}.cmp-live-head p{font-size:11px;color:var(--muted);margin-top:3px}
+.cmp-live-count{font:700 11px "IBM Plex Mono",monospace;color:#ff9aa6;background:rgba(255,94,114,.1);border:1px solid rgba(255,94,114,.25);padding:6px 9px;border-radius:20px}
+.cmp-match{border:1px solid var(--line);background:rgba(8,13,22,.48);border-radius:12px;padding:13px;margin-top:9px}
+.cmp-match-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.cmp-teams{font-weight:750;font-size:14px}.cmp-meta{font-size:11px;color:var(--muted);margin-top:4px}
+.cmp-live-score{font:800 19px "IBM Plex Mono",monospace;white-space:nowrap;color:var(--ink)}
+.cmp-alert-sources{display:flex;align-items:center;gap:6px;flex-wrap:wrap;margin:11px 0 8px}
+.cmp-source{font:700 10px "IBM Plex Mono",monospace;padding:5px 8px;border-radius:7px;background:rgba(163,243,107,.09);border:1px solid rgba(163,243,107,.28);color:var(--accent)}
+.cmp-source.none{color:var(--muted);background:rgba(255,255,255,.03);border-color:var(--line)}
+.cmp-all{font-size:10px;color:#8ff0ad;font-weight:800;margin-left:auto}
+.cmp-score-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:7px}
+.cmp-score-cell{background:rgba(255,255,255,.035);border:1px solid var(--line);border-radius:9px;padding:9px;min-width:0}
+.cmp-score-cell small{display:block;color:var(--muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cmp-score-cell b{display:block;font:700 17px "IBM Plex Mono",monospace;margin:4px 0}
+.cmp-score-cell em{font-style:normal;color:var(--muted);font-size:10px}
+.cmp-score-cell.hit{border-color:rgba(163,243,107,.35)}
+.cmp-foot{font-size:10px;color:var(--muted);margin-top:9px}
+@media(max-width:520px){.cmp-live{padding:12px}.cmp-score-grid{gap:5px}.cmp-score-cell{padding:7px}.cmp-score-cell b{font-size:15px}.cmp-teams{font-size:12px}.cmp-live-score{font-size:16px}}
+
 </style>
 </head>
 <body>
@@ -196,6 +219,7 @@ main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
       <p class="learn-note" id="learnNote">Kartlara dokunarak ilgili maç örneklerini açabilirsin.</p>
       <div id="learnDetail" class="learn-detail" hidden></div>
     </section>
+    <section class="cmp-live" id="comparisonLive"><div class="cmp-live-head"><div><h3>Devam eden maç bildirimleri</h3><p>Üç algoritmanın alarmı ve en güncel skorları</p></div><span class="cmp-live-count" id="cmpLiveCount">Yükleniyor</span></div><div id="cmpLiveList"><p class="empty">Karşılaştırma verileri yükleniyor...</p></div></section>
     <div class="dash-grid" id="dashCards"></div>
     <div class="dash-toolbar"><h3 id="dashTitle">Bildirim gönderilen maçlar</h3><button id="dashRefresh">Yenile</button></div>
     <div id="dashList"><p class="empty">Bildirim geçmişi yükleniyor...</p></div>

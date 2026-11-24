@@ -1100,6 +1100,24 @@ app.get("/api/learning-baseline/items", auth, (req, res) => {
   })) });
 });
 
+app.get("/api/comparison/live", auth, async (_req, res) => {
+  const base = String(env.COMPARISON_API_URL || "").replace(/\/$/, "");
+  const token = env.COMPARISON_API_TOKEN || "";
+  if (!base || !token) return res.status(503).json({ error: "Karşılaştırma servisi yapılandırılmamış." });
+  try {
+    const upstream = await fetch(`${base}/v1/live-notifications`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(7000),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    if (!upstream.ok) return res.status(upstream.status).json({ error: "Karşılaştırma verisi alınamadı." });
+    res.json(data);
+  } catch (e) {
+    console.error("comparison live feed:", e.message);
+    res.status(502).json({ error: "Karşılaştırma servisine ulaşılamadı." });
+  }
+});
+
 app.get("/api/rules", auth, (req, res) => res.json({ rules: loadRules() }));
 app.post("/api/rules", auth, (req, res) => {
   const rules = req.body?.rules;

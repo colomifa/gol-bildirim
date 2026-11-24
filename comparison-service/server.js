@@ -219,4 +219,51 @@ app.post("/v1/match-state", async (req, res) => {
   } finally { client.release(); }
 });
 
+app.get("/v1/live-notifications", async (_req, res) => {
+  try {
+    const q = await pool.query(`
+      WITH live_notifications AS (
+        SELECT *
+        FROM algorithm_goal_notifications
+        WHERE outcome IN ('pending','window_passed')
+          AND UPPER(COALESCE(match_status, 'LIVE')) NOT IN ('FT','AET','PEN','AWD','WO')
+      ),
+      latest_scores AS (
+        SELECT DISTINCT ON (source, fixture_id)
+          source, fixture_id, score, minute, home_goals, away_goals, captured_at
+        FROM algorithm_score_snapshots
+        ORDER BY source, fixture_id, captured_at DESC
+      )
+      SELECT
+        n.fixture_id,
+        MAX(n.home) AS home,
+        MAX(n.away) AS away,
+        MAX(n.minute) AS latest_notification_minute,
+        MAX(n.notified_at) AS latest_notified_at,
+        jsonb_agg(jsonb_build_object(
+          'source', n.source,
+          'minute', n.minute,
+          'notified_at', n.notified_at,
+          'source_score', n.source_score,
+          'score_at', n.score_at,
+          'outcome', n.outcome
+        ) ORDER BY n.notified_at DESC) AS notifications,
+        (SELECT jsonb_object_agg(s.source, jsonb_build_object(
+          'score', s.score, 'minute', s.minute,
+          'home_goals', s.home_goals, 'away_goals', s.away_goals,
+          'captured_at', s.captured_at
+        )) FROM latest_scores s WHERE s.fixture_id = n.fixture_id) AS scores,
+        (SELECT COUNT(DISTINCT n2.source)::int FROM live_notifications n2 WHERE n2.fixture_id=n.fixture_id) AS source_count
+      FROM live_notifications n
+      GROUP BY n.fixture_id
+      ORDER BY MAX(n.notified_at) DESC
+      LIMIT 200
+    `);
+    res.json({ ok: true, items: q.rows, sources: [...SOURCES] });
+  } catch (e) {
+    console.error("live notifications query:", e.message);
+    res.status(500).json({ error: "database_error" });
+  }
+});
+
 app.listen(PORT, () => console.log(`Algorithm comparison collector listening on ${PORT}`));

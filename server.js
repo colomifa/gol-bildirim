@@ -22,7 +22,7 @@ const COMPARISON_URL = String(env.COMPARISON_API_URL || "").replace(/\\/$/, "");
 const COMPARISON_TOKEN = env.COMPARISON_API_TOKEN || "";
 const COMPARISON_SOURCE = "gol-bildirim";
 async function comparisonPost(endpoint, payload) {
-  if (!COMPARISON_URL || !COMPARISON_TOKEN) return;
+  if (!COMPARISON_URL || !COMPARISON_TOKEN) return Promise.resolve();
   const response = await fetch(`${COMPARISON_URL}${endpoint}`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: `Bearer ${COMPARISON_TOKEN}` },

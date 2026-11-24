@@ -1014,7 +1014,12 @@ async function poll() {
       }
     }
     syncNotificationLiveState();
-    for (const n of notifications) if (n.kind === "goal-signal") recordComparisonMatchState(n);
+    const comparisonStateSent = new Set();
+    for (const n of notifications) {
+      if (n.kind !== "goal-signal" || comparisonStateSent.has(String(n.fixtureId))) continue;
+      comparisonStateSent.add(String(n.fixtureId));
+      recordComparisonMatchState(n);
+    }
     saveMatchState();
     cache = { matches: all, updated: now, error: warns[0] || "" };
     const log = `[poll] fikstür=${schedule.length} canlı=${liveMap.size} istatistik_maç=${statCandidates.length} istatistik_toplu_istek=${statsBatchCount} xG_verisi_yok=${xgBlocked} bildirim=${notifications.length} kalan_istek=${quota ?? "?"}`;

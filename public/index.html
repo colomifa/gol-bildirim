@@ -165,6 +165,13 @@ main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
 @media(min-width:900px){#list{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}.mw{margin:0}.dt{grid-column:1/-1}.mw:has(.dt){grid-column:1/-1}}
 @media(max-width:700px){header{padding-left:16px;padding-right:16px}.w{max-width:none}main{padding:22px 16px 30px}.m{grid-template-columns:48px minmax(0,1fr) 42px;gap:11px;padding:13px}.rt{gap:8px}.st{font-size:11px}#stt{max-width:100px}.pill{padding:7px 9px;font-size:10px}}
 @media(max-width:460px){h1{font-size:15px}h1:before{width:32px;height:32px;font-size:16px}.top{gap:8px}.rt{gap:7px}#stt{max-width:68px}.st{gap:5px}.pill{padding:7px 8px}.m{grid-template-columns:43px minmax(0,1fr) 38px;gap:9px;padding:12px 10px}.tm span{font-size:13px}.tm b{font-size:14px}.add{min-width:36px;height:38px}.c{grid-template-columns:minmax(0,1fr) 58px 70px 28px;gap:5px}.c select,.c input{padding:8px 7px;font-size:12px;min-height:39px}.c.one{grid-template-columns:1fr}.rb{padding:4px 12px 14px}.rh{padding:14px 12px;gap:10px}.row{align-items:flex-start}.bar{padding-left:12px;padding-right:12px}.bar button{padding:11px 14px}.bar #save{min-width:0;flex:1}.bar #test{flex:1}}
+
+.learn-box{border:1px solid var(--line);border-radius:16px;padding:16px;margin:0 0 20px;background:var(--surface)}
+.learn-head{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.learn-head h3{margin:4px 0;font-size:18px}.learn-head p{margin:4px 0}.learn-head button,.learn-detail button{border:1px solid var(--line);background:var(--surface-2);color:var(--ink);border-radius:9px;padding:8px 11px}
+.learn-progress{margin:14px 0}.learn-progress>div:first-child{display:flex;justify-content:space-between;gap:8px;align-items:center;margin-bottom:7px}.learn-progress strong{font-size:20px}.learn-progress small{color:var(--muted)}.learn-track{height:8px;background:var(--line);border-radius:99px;overflow:hidden}.learn-track i{display:block;height:100%;width:0;background:var(--accent);border-radius:99px}
+.learn-cards{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:9px}.learn-card{border:1px solid var(--line);border-radius:12px;background:var(--surface-2);padding:12px;text-align:left;color:var(--ink);cursor:pointer;min-width:0}.learn-card:active,.learn-card.on{border-color:var(--accent);background:var(--surface-3)}.learn-card small{display:block;color:var(--muted);font-size:11px;min-height:30px}.learn-card strong{display:block;font-size:24px;margin:5px 0}.learn-card em{display:block;color:var(--muted);font-size:10px;font-style:normal}.learn-note{color:var(--muted);font-size:11px;margin:10px 0 0}.learn-detail{margin-top:12px;border-top:1px solid var(--line);padding-top:12px}.learn-detail h4{margin:0 0 10px}.learn-item{padding:10px 0;border-bottom:1px solid var(--line);display:grid;grid-template-columns:minmax(0,1fr) auto;gap:5px 12px}.learn-item b{font-size:13px}.learn-item small{display:block;color:var(--muted);font-size:11px}.learn-item span{font-size:12px;text-align:right}.learn-empty{color:var(--muted);font-size:13px;padding:12px 0}
+@media(max-width:700px){.learn-cards{grid-template-columns:repeat(2,minmax(0,1fr))}.learn-box{padding:13px}.learn-item{grid-template-columns:minmax(0,1fr) auto}}
+
 </style>
 </head>
 <body>
@@ -182,6 +189,13 @@ main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
 <main>
   <div id="pd" hidden>
     <div class="dash-head"><div><div class="mute">BİLDİRİM ANALİZİ</div><h2>Bildirim merkezi</h2><p class="mute">Gönderilen bildirimler, anlık skor, gol dakikaları ve maç sonu sonucu.</p></div><input class="dash-date" id="ddate" type="date" aria-label="Tarih"></div>
+    <section class="learn-box" id="learningBox">
+      <div class="learn-head"><div><div class="mute">7 GÜNLÜK BAŞLANGIÇ ÖLÇÜMÜ</div><h3>Öğrenme ve performans</h3><p class="mute" id="learnStatus">Ölçüm bilgileri yükleniyor...</p></div><button id="learnRefresh">Yenile</button></div>
+      <div class="learn-progress"><div><strong id="learnDay">—</strong><small id="learnRemaining">—</small></div><div class="learn-track"><i id="learnTrack"></i></div></div>
+      <div class="learn-cards" id="learnCards"></div>
+      <p class="learn-note" id="learnNote">Kartlara dokunarak ilgili maç örneklerini açabilirsin.</p>
+      <div id="learnDetail" class="learn-detail" hidden></div>
+    </section>
     <div class="dash-grid" id="dashCards"></div>
     <div class="dash-toolbar"><h3 id="dashTitle">Bildirim gönderilen maçlar</h3><button id="dashRefresh">Yenile</button></div>
     <div id="dashList"><p class="empty">Bildirim geçmişi yükleniyor...</p></div>
@@ -234,7 +248,7 @@ let andFlt;try{andFlt=JSON.parse(localStorage.getItem("andFlt")||"null")}catch{a
 if(!andFlt||!Array.isArray(andFlt.conditions))andFlt={on:false,conditions:[{metric:"home_goals",op:">=",value:1,period:"all"}]};
 let andOpen=false;
 const saveAndFlt=()=>{try{localStorage.setItem("andFlt",JSON.stringify(andFlt))}catch{}};
-let dashData=null,dashFilter="all",dashOpen=null;
+let dashData=null,dashFilter="all",dashOpen=null,learningData=null,learningType=null;
 const saveFlt=()=>{try{localStorage.setItem("flt",JSON.stringify(flt))}catch{}};
 let pw=localStorage.getItem("pw")||prompt("Panel şifresi:");
 const H=()=>({"Content-Type":"application/json","x-password":pw});
@@ -418,6 +432,7 @@ function groupedNotifs(items){
   return [...map.values()].sort((a,b)=>Math.max(...b.items.map(x=>x.sentAt))-Math.max(...a.items.map(x=>x.sentAt)));
 }
 function renderDashboard(){
+  renderLearningBaseline();
   if(!dashData){$("dashList").innerHTML='<p class="empty">Bildirim geçmişi yükleniyor...</p>';return}
   const c=dashData.counts||{};
   const cards=[
@@ -440,9 +455,31 @@ function renderDashboard(){
     const liveTag=final?'<span style="color:var(--ok);font-size:10px">MS</span>':`<span style="color:var(--accent);font-size:10px">${esc(latest.currentMinute??latest.minute)}' CANLI</span>`;
     const goalText=(latest.goalMinutes||[]).length?`Gol dakikaları: ${(latest.goalMinutes||[]).map(x=>`${x}'`).join(", ")}`:"Gol dakikaları: henüz yok / olay verisi bekleniyor";
     return `<div class="dash-match"><button data-dmatch="${esc(g.id)}"><div><div class="dm-teams">${esc(g.home)} – ${esc(g.away)}</div><div class="dm-meta">${esc(g.country)} · ${esc(g.league)} · ${g.items.length} bildirim · ${esc(goalText)}</div></div><div class="dm-score">${scoreText(shownScore)} ${liveTag}</div></button>
-    ${opened?`<div class="dash-notifs">${g.items.slice().sort((a,b)=>a.sentAt-b.sentAt).map(n=>`<div class="dash-notif"><div><div class="dn-rule">${esc(n.ruleName)}</div><div class="dn-time">${new Date(n.sentAt).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} · Sinyal: ${n.minute}' · Son kontrol: ${esc(n.currentMinute??n.minute)}'</div></div><div><div class="dn-score">Bildirim anı: ${scoreText(n.scoreAt)}</div><div class="dn-final">${n.finalScore?`Maç sonu: ${scoreText(n.finalScore)}`:`Anlık skor: ${scoreText(n.currentScore||n.scoreAt)}`}</div></div><div class="dn-sub">${(n.goalMinutes||[]).length?`Gol dakikaları: ${n.goalMinutes.map(x=>`${x}'`).join(", ")}`:"Gol dakikaları: veri bekleniyor"}${n.signalScore!=null?` · Model: ${n.signalScore}/100`:""}${n.signalReason?.length?` · Neden: ${n.signalReason.map(esc).join(", ")}`:""}</div></div>`).join("")}</div>`:""}</div>`;
+    ${opened?`<div class="dash-notifs">${g.items.slice().sort((a,b)=>a.sentAt-b.sentAt).map(n=>`<div class="dash-notif"><div><div class="dn-rule">${esc(n.ruleName)}</div><div class="dn-time">${new Date(n.sentAt).toLocaleTimeString("tr-TR",{hour:"2-digit",minute:"2-digit",second:"2-digit"})} · Sinyal: ${n.minute}' · Son kontrol: ${esc(n.currentMinute??n.minute)}'</div></div><div><div class="dn-score">Bildirim anı: ${scoreText(n.scoreAt)}</div><div class="dn-final">${n.finalScore?`Maç sonu: ${scoreText(n.finalScore)}`:`Anlık skor: ${scoreText(n.currentScore||n.scoreAt)}`}</div></div><div class="dn-sub">${(n.goalMinutes||[]).length?`Gol dakikaları: ${n.goalMinutes.map(x=>`${x}'`).join(", ")}`:"Gol dakikaları: veri bekleniyor"}${n.signalScore!=null?` · Model: ${n.signalScore}/100`:""}${n.signalReason?.length?` · Neden: ${n.signalReason.map(esc).join(", ")}`:""}${n.liveOdds?.lines?.["2.5"]?` · Canlı 2.5 Üst/Alt: ${n.liveOdds.lines["2.5"].over??"–"}/${n.liveOdds.lines["2.5"].under??"–"}`:" · Canlı oran verisi yok"}</div></div>`).join("")}</div>`:""}</div>`;
   }).join("");
 }
+const LEARN_TYPES={correct:["Doğru alarm","Alarm verildi ve hedef pencerede gol oldu"],false_alarm:["Yanlış alarm","Alarm verildi ancak hedef pencerede gol olmadı"],missed:["Kaçırılan gol","Alarm verilmedi ancak hedef pencerede gol oldu"],correct_reject:["Doğru pas geçme","Alarm verilmedi ve hedef pencerede gol olmadı"]};
+async function renderLearningBaseline(){
+  try{
+    const r=await fetch("/api/learning-baseline",{headers:H()});if(!r.ok)throw new Error("Ölçüm bilgisi alınamadı");
+    learningData=await r.json();const d=learningData,elapsed=Math.min(7,Math.floor((d.elapsedMs||0)/86400000)+1),pct=Math.max(0,Math.min(100,(d.elapsedMs||0)/(7*86400000)*100));
+    $("learnDay").textContent=d.complete?"7 / 7 gün":`${elapsed} / 7 gün`;
+    $("learnRemaining").textContent=d.complete?"Başlangıç ölçümü tamamlandı":`Kalan: ${Math.ceil((d.remainingMs||0)/3600000)} saat`;
+    $("learnTrack").style.width=pct+"%";
+    $("learnStatus").textContent=d.mode==="baseline"?"Başlangıç ölçümü açık · Model yeniden eğitilmiyor":"Ölçüm modu kapalı";
+    const cards=[ ["correct","Doğru alarm",d.alarmThenGoal||0,"Alarm + gol"],["false_alarm","Yanlış alarm",d.alarmNoGoal||0,"Alarm + gol yok"],["missed","Kaçırılan gol",d.missedGoalWindows||0,"Alarm yok + gol"],["correct_reject","Doğru pas geçme",d.noAlarmNoGoal||0,"Alarm yok + gol yok"] ];
+    $("learnCards").innerHTML=cards.map(x=>`<button class="learn-card ${learningType===x[0]?"on":""}" data-learning-type="${x[0]}"><small>${x[1]}</small><strong>${x[2]}</strong><em>${x[3]} · Ayrıntıları aç</em></button>`).join("");
+    $("learnNote").textContent=d.note||"Kartlara dokunarak örnek maçları inceleyebilirsin.";
+  }catch(e){$("learnStatus").textContent=e.message}
+}
+async function loadLearningItems(type,show=true){
+  learningType=type;const box=$("learnDetail");box.hidden=false;box.innerHTML='<div class="learn-empty">Örnekler yükleniyor...</div>';
+  try{const r=await fetch(`/api/learning-baseline/items?type=${encodeURIComponent(type)}`,{headers:H()});if(!r.ok)throw new Error("Örnekler alınamadı");const d=await r.json();const title=LEARN_TYPES[type]?.[0]||"Örnekler";
+    box.innerHTML=`<h4>${title} · ${d.count} örnek</h4>`+(d.items.length?d.items.map(v=>`<div class="learn-item"><div><b>${esc(v.home)} – ${esc(v.away)}</b><small>${esc(v.league)} · ${new Date(v.createdAt).toLocaleString("tr-TR")} · Örnek: ${v.minute}' → ${v.targetMinute}'</small><small>Skor: ${v.scoreAt} · Baskı: ${v.livePressure??"–"} · Veri kapsamı: %${v.coverage??"–"}</small></div><span>${esc(v.result)}</span></div>`).join(""):'<div class="learn-empty">Bu kategoride henüz etiketlenmiş örnek yok.</div>');
+    if(show)box.scrollIntoView({behavior:"smooth",block:"nearest"});
+  }catch(e){box.innerHTML=`<div class="learn-empty">${esc(e.message)}</div>`}
+}
+
 async function loadDashboard(){
   if(tab!=="d")return;
   try{
@@ -478,7 +515,7 @@ function renderGoalAnalysis(){
     const c=p.context||{},o=p.preOdds||{};
     const status=p.signal?`<span class="ga-signal">GOL SİNYALİ · TELEGRAMA GÖNDERİLDİ</span>`:`<span class="ga-muted">${esc(p.level||"Analiz")}</span>`;
     const probability=p.probability==null?`<div class="ga-prob">Deneysel puan <b>${p.score}/100</b><small>Kalibre edilmiş olasılık modeli için geçmiş veri birikiyor</small></div>`:`<div class="ga-prob">Önümüzdeki 10 dk deneysel tahmin <b>%${p.probability}</b><small>${esc(p.probabilityLabel||"")} · ${p.score}/100 model puanı</small></div>`;
-    return `<article class="ga-card"><div class="ga-top"><div><div class="ga-teams">${esc(m.home)} – ${esc(m.away)}</div><div class="ga-meta">${esc(m.country||"")} · ${esc(m.league||"")} · ${esc(m.minute)}' · Skor ${esc(m.homeGoals)}-${esc(m.awayGoals)}</div></div><div style="text-align:right"><b class="ga-model-score">${p.score}/100</b><div>${status}</div></div></div>${probability}<div class="ga-track"><i style="width:${Math.max(0,Math.min(100,p.score||0))}%"></i></div><div class="ga-details">${comp}<br>Maç önü 1-X-2: ${o.home??"–"} / ${o.draw??"–"} / ${o.away??"–"} · 2.5 Üst: ${o.over25??"–"} · 2.5 Alt: ${o.under25??"–"}<br>2.5 üst piyasa olasılığı: ${p.over25Probability==null?"veri yok":"%"+Math.round(p.over25Probability*100)} · Tahmini toplam gol: ${p.expectedGoals==null?"veri yok":p.expectedGoals}<br>Sıralama: ${c.homeRank??"–"}. / ${c.awayRank??"–"}. · Puan: ${c.homePoints??"–"} / ${c.awayPoints??"–"}<br>İç saha gol ort.: ${c.homeScored??"–"} · İç saha yenilen: ${c.homeConceded??"–"} · Deplasman gol ort.: ${c.awayScored??"–"} · Deplasman yenilen: ${c.awayConceded??"–"}<br>Form: ${esc(c.homeForm||"–")} / ${esc(c.awayForm||"–")} · Veri kapsamı: %${p.coverage??0} · Etiketlenmiş eğitim örneği: ${p.training?.labelledSamples??0}<br>Ceza sahası içi/dışı şut: ${p.features?.insideShots??"–"} / ${p.features?.outsideShots??"–"} · İç saha şut oranı: ${p.features?.insideRatio==null?"veri yok":"%"+Math.round(p.features.insideRatio*100)}<br>Son 10 dk faul: ${p.features?.fouls??"–"} · Faul tempo etkisi: -${p.features?.foulPenalty??0} · Dış şut etkisi: -${p.features?.outsidePenalty??0}<br>Kırmızı kart: Ev ${p.features?.redHome??0} / Dep ${p.features?.redAway??0} · Gerideyken 60+ değişiklik: ${p.features?.trailingSubCount??0} · Değişiklik sonrası baskı: ${p.features?.postSubPressure??"henüz ölçülemedi"}<br>Son 15 dk gol yeme (sezon 76–90): Ev ${c.homeLateConceded??"–"} / Dep ${c.awayLateConceded??"–"}</div></article>`;
+    return `<article class="ga-card"><div class="ga-top"><div><div class="ga-teams">${esc(m.home)} – ${esc(m.away)}</div><div class="ga-meta">${esc(m.country||"")} · ${esc(m.league||"")} · ${esc(m.minute)}' · Skor ${esc(m.homeGoals)}-${esc(m.awayGoals)}</div></div><div style="text-align:right"><b class="ga-model-score">${p.score}/100</b><div>${status}</div></div></div>${probability}<div class="ga-track"><i style="width:${Math.max(0,Math.min(100,p.score||0))}%"></i></div><div class="ga-details">${comp}<br>Maç önü 1-X-2: ${o.home??"–"} / ${o.draw??"–"} / ${o.away??"–"} · 2.5 Üst: ${o.over25??"–"} · 2.5 Alt: ${o.under25??"–"}<br>2.5 üst piyasa olasılığı: ${p.over25Probability==null?"veri yok":"%"+Math.round(p.over25Probability*100)} · Tahmini toplam gol: ${p.expectedGoals==null?"veri yok":p.expectedGoals}<br>Sıralama: ${c.homeRank??"–"}. / ${c.awayRank??"–"}. · Puan: ${c.homePoints??"–"} / ${c.awayPoints??"–"}<br>İç saha gol ort.: ${c.homeScored??"–"} · İç saha yenilen: ${c.homeConceded??"–"} · Deplasman gol ort.: ${c.awayScored??"–"} · Deplasman yenilen: ${c.awayConceded??"–"}<br>Form: ${esc(c.homeForm||"–")} / ${esc(c.awayForm||"–")} · Veri kapsamı: %${p.coverage??0} · Etiketlenmiş eğitim örneği: ${p.training?.labelledSamples??0}<br>Ceza sahası içi/dışı şut: ${p.features?.insideShots??"–"} / ${p.features?.outsideShots??"–"} · İç saha şut oranı: ${p.features?.insideRatio==null?"veri yok":"%"+Math.round(p.features.insideRatio*100)}<br>Son 10 dk faul: ${p.features?.fouls??"–"} · Faul tempo etkisi: -${p.features?.foulPenalty??0} · Dış şut etkisi: -${p.features?.outsidePenalty??0}<br>Kırmızı kart: Ev ${p.features?.redHome??0} / Dep ${p.features?.redAway??0} · Gerideyken 60+ değişiklik: ${p.features?.trailingSubCount??0} · Değişiklik sonrası baskı: ${p.features?.postSubPressure??"henüz ölçülemedi"}<br>Son 15 dk gol yeme (sezon 76–90, maç başına): Ev ${c.homeLateConceded??"–"} / Dep ${c.awayLateConceded??"–"}<br>Sonraki golü atmaya daha yakın taraf: <b>${esc(p.nextGoal?.label||"Belirsiz")}</b> · ${esc(p.nextGoal?.reason||"Canlı veri bekleniyor")} · Canlı kanıt: Ev ${p.nextGoal?.homeEvidence??0}/4, Dep ${p.nextGoal?.awayEvidence??0}/4 · Fark ${p.nextGoal?.margin??0}<br>Son gol: ${p.features?.latestGoalSide==="home"?esc(m.home):p.features?.latestGoalSide==="away"?esc(m.away):"–"} · Golden sonra geçen süre: ${p.features?.minutesSinceGoal??"–"} dk · Skor koruma değişikliği: ${p.features?.scoreProtectSub?"Olası":"Tespit edilmedi"}<br>Gol sonrası dönem (${p.features?.afterGoalPeriodFrom??"–"}'): Ev ${p.features?.afterGoalHomeShots??"–"} şut · Dep ${p.features?.afterGoalAwayShots??"–"} şut<br>Kırmızı kart sonrası dönem (${p.features?.afterRedPeriodFrom??"–"}'): Ev ${p.features?.afterRedHomeShots??"–"} şut · Dep ${p.features?.afterRedAwayShots??"–"} şut · ${p.features?.redTransition?"İlk 5 dk geçiş dönemi":"Normal değerlendirme"}<br>Canlı 2.5 Üst/Alt: ${p.liveOddsLines?.["2.5"]?.over??"oran yok"} / ${p.liveOddsLines?.["2.5"]?.under??"oran yok"} · 3.5: ${p.liveOddsLines?.["3.5"]?.over??"–"} / ${p.liveOddsLines?.["3.5"]?.under??"–"} · 4.5: ${p.liveOddsLines?.["4.5"]?.over??"–"} / ${p.liveOddsLines?.["4.5"]?.under??"–"}<br>Gol sonrası baskı: Ev ${p.features?.postGoalHomePressure??"–"}/100 · Dep ${p.features?.postGoalAwayPressure??"–"}/100</div></article>`;
   }).join("");
   const pressureCards=scored.map(m=>{
     const a=m.goalAnalysis||{},w10=a.w10,w15=a.w15;
@@ -547,7 +584,7 @@ document.addEventListener("input",e=>{
   r[d.f]=t.value;
 });
 document.addEventListener("click",e=>{
-  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om],[data-per],[data-fdel],[data-adel],[data-dfilter],[data-dmatch],#fbtn,#faddc,#fclear,#fapply,#andbtn,#andtoggle,#andaddc,#andclear,#andapply,#dashRefresh");
+  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om],[data-per],[data-fdel],[data-adel],[data-dfilter],[data-dmatch],[data-learning-type],#learnRefresh,#fbtn,#faddc,#fclear,#fapply,#andbtn,#andtoggle,#andaddc,#andclear,#andapply,#dashRefresh");
   if(!b)return;const d=b.dataset;
   if(b.id==="andbtn"){andOpen=!andOpen;renderAndFilter();return}
   if(b.id==="andtoggle"){
@@ -567,6 +604,8 @@ document.addEventListener("click",e=>{
     andFlt.on=true;saveAndFlt();andOpen=false;fres=null;render();loadFilter();return;
   }
   if(d.adel!==undefined){andFlt.conditions.splice(d.adel,1);saveAndFlt();renderAndFilter();return}
+  if(d.learningType){learningType=d.learningType;renderLearningBaseline();loadLearningItems(learningType);return}
+  if(b.id==="learnRefresh"){renderLearningBaseline();return}
   if(d.dfilter){dashFilter=d.dfilter;renderDashboard();return}
   if(d.dmatch!==undefined){dashOpen=dashOpen===d.dmatch?null:d.dmatch;renderDashboard();return}
   if(b.id==="dashRefresh"){loadDashboard();return}

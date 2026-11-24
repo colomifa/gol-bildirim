@@ -17,6 +17,46 @@ const BASELINE_MODE = env.BASELINE_MODE !== "false";
 const BASELINE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 const LEAGUES = (env.LEAGUE_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
 
+// ---------- Algoritma karşılaştırma kaydı (yalnızca kendi ürettiği skor/bildirim) ----------
+const COMPARISON_URL = String(env.COMPARISON_API_URL || "").replace(/\\/$/, "");
+const COMPARISON_TOKEN = env.COMPARISON_API_TOKEN || "";
+const COMPARISON_SOURCE = "gol-bildirim";
+async function comparisonPost(endpoint, payload) {
+  if (!COMPARISON_URL || !COMPARISON_TOKEN) return;
+  const response = await fetch(`${COMPARISON_URL}${endpoint}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${COMPARISON_TOKEN}` },
+    body: JSON.stringify(payload),
+    signal: AbortSignal.timeout(5000),
+  });
+  if (!response.ok) throw new Error(`comparison HTTP ${response.status}`);
+}
+function recordComparisonScore(m, prediction, capturedAt) {
+  comparisonPost("/v1/scores", {
+    source: COMPARISON_SOURCE, fixture_id: String(m.id),
+    home: m.home, away: m.away, minute: Number(m.minute) || 0,
+    score: Number(prediction.score), match_status: m.short || "LIVE",
+    home_goals: m.homeGoals ?? null, away_goals: m.awayGoals ?? null,
+    captured_at: new Date(capturedAt).toISOString(),
+  }).catch((e) => console.warn("[comparison] skor kaydı gönderilemedi:", e.message));
+}
+function recordComparisonNotification(n) {
+  comparisonPost("/v1/notifications", {
+    source: COMPARISON_SOURCE, notification_id: String(n.id),
+    fixture_id: String(n.fixtureId), home: n.home, away: n.away,
+    minute: Number(n.minute) || 0, score_at: n.scoreAt || null,
+    score: Number(n.signalScore), notified_at: new Date(n.sentAt).toISOString(),
+    goal_minutes: n.goalMinutes || [], match_status: n.status || "LIVE",
+  }).catch((e) => console.warn("[comparison] bildirim kaydı gönderilemedi:", e.message));
+}
+function recordComparisonMatchState(n) {
+  comparisonPost("/v1/match-state", {
+    fixture_id: String(n.fixtureId), goal_minutes: n.goalMinutes || [],
+    match_status: n.status || "LIVE", final_score: n.finalScore || null,
+  }).catch((e) => console.warn("[comparison] maç sonucu gönderilemedi:", e.message));
+}
+
+
 if (!BOT_TOKEN || !CHAT_ID || !PANEL_PASSWORD) {
   console.error("Eksik ortam değişkeni: BOT_TOKEN, CHAT_ID ve PANEL_PASSWORD gerekli.");
   process.exit(1);
@@ -922,6 +962,7 @@ async function poll() {
       const prediction = scoreGoalContext({ ...m, red: S?.all?.red }, profileContext(m, x), { ...(m.goalAnalysis || {}), events: x.events || [], hist: x.hist || [], currentRows: S?.lists?.all || {}, periods, liveOdds: x.liveOdds || null });
       updateTraining(m, x, prediction, now);
       m.goalPrediction = prediction;
+      recordComparisonScore(m, prediction, now);
       const currentGoalCount = Array.isArray(x.goals) ? x.goals.length : ((Number(m.homeGoals)||0)+(Number(m.awayGoals)||0));
       const signalKey = `${m.id}:${currentGoalCount}`;
       const latestGoalMinute = Array.isArray(x.goals) && x.goals.length ? Math.max(...x.goals.map(g => Number(g.minute)||0)) : 0;
@@ -964,6 +1005,8 @@ async function poll() {
           ];
           await sendTelegram(lines.join("\n"));
           addGoalSignalNotification(m, prediction, now, x.goals || [], x.liveOdds || null);
+          const comparisonNotification = notifications[notifications.length - 1];
+          if (comparisonNotification?.kind === "goal-signal") recordComparisonNotification(comparisonNotification);
           modelStore.sentSignals[signalKey] = now;
           saveModel();
           console.log("Gol sinyali gönderildi:", m.home, "-", m.away, prediction.score);
@@ -971,6 +1014,7 @@ async function poll() {
       }
     }
     syncNotificationLiveState();
+    for (const n of notifications) if (n.kind === "goal-signal") recordComparisonMatchState(n);
     saveMatchState();
     cache = { matches: all, updated: now, error: warns[0] || "" };
     const log = `[poll] fikstür=${schedule.length} canlı=${liveMap.size} istatistik_maç=${statCandidates.length} istatistik_toplu_istek=${statsBatchCount} xG_verisi_yok=${xgBlocked} bildirim=${notifications.length} kalan_istek=${quota ?? "?"}`;

@@ -18,7 +18,7 @@ const BASELINE_DURATION_MS = 7 * 24 * 60 * 60 * 1000;
 const LEAGUES = (env.LEAGUE_IDS || "").split(",").map((s) => s.trim()).filter(Boolean);
 
 // ---------- Algoritma karşılaştırma kaydı (yalnızca kendi ürettiği skor/bildirim) ----------
-const COMPARISON_URL = String(env.COMPARISON_API_URL || "").replace(/\\/$/, "");
+const COMPARISON_URL = String(env.COMPARISON_API_URL || "").replace(/\/$/, "");
 const COMPARISON_TOKEN = env.COMPARISON_API_TOKEN || "";
 const COMPARISON_SOURCE = "gol-bildirim";
 async function comparisonPost(endpoint, payload) {

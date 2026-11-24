@@ -192,6 +192,13 @@ main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
 .cmp-score-cell b{display:block;font:700 17px "IBM Plex Mono",monospace;margin:4px 0}
 .cmp-score-cell em{font-style:normal;color:var(--muted);font-size:10px}
 .cmp-score-cell.hit{border-color:rgba(163,243,107,.35)}
+.cmp-match-mini{margin:8px 0 2px}
+.mw .cmp-match-mini{padding:0 12px 12px;grid-template-columns:repeat(3,minmax(0,1fr))}
+.ga-card .cmp-match-mini{margin:10px 0}
+.cmp-match-mini .cmp-score-cell{padding:6px}
+.cmp-match-mini .cmp-score-cell b{font-size:14px}
+.cmp-match-mini .cmp-score-cell em{font-size:9px}
+@media(max-width:520px){.mw .cmp-match-mini{padding:0 8px 10px;gap:4px}.cmp-match-mini .cmp-score-cell{padding:5px}.cmp-match-mini .cmp-score-cell b{font-size:12px}}
 .cmp-foot{font-size:10px;color:var(--muted);margin-top:9px}
 @media(max-width:520px){.cmp-live{padding:12px}.cmp-score-grid{gap:5px}.cmp-score-cell{padding:7px}.cmp-score-cell b{font-size:15px}.cmp-teams{font-size:12px}.cmp-live-score{font-size:16px}}
 
@@ -226,6 +233,7 @@ main{max-width:1180px;margin:0 auto;padding:26px 24px 36px}
   </div>
   <div id="pm">
     <div id="note" class="note" hidden>Pasif: API'ye sorgu atılmıyor, bildirim gitmiyor. Liste güncellenmez.</div>
+    <section class="cmp-live" id="comparisonMatches"><div class="cmp-live-head"><div><h3>Devam eden maç bildirimleri</h3><p>Bildirim gönderen algoritmalar ve üç algoritmanın en güncel skorları</p></div><span class="cmp-live-count" id="cmpMatchesCount">Yükleniyor</span></div><div id="cmpMatchesList"><p class="empty">Karşılaştırma verileri yükleniyor...</p></div></section>
     <button class="ghost" id="fbtn">Canlı filtre</button>
     <div id="fpanel" class="fp" hidden></div>
     <button class="ghost" id="andbtn">＋ Yeni AND filtresi</button>
@@ -339,7 +347,7 @@ function detailHtml(m){
   const f=v=>v==null||v===""?"–":esc(v);
   const row=(t,x)=>x?`<tr><td>${t}</td><td>${f(x.home)}</td><td>${f(x.draw)}</td><td>${f(x.away)}</td><td>${f(x.over25)}</td><td>${f(x.under25)}</td></tr>`:`<tr><td>${t}</td><td colspan="5" class="mute">veri yok</td></tr>`;
   const T=(d.totals||{})[dper]||{},o=d.odds||{},rows=(d.stats||{})[dper]||[];
-  return `<div class="dt">
+  return `<div class="dt"><div class="row" style="margin-top:0"><span class="mute">Maç ayrıntıları</span><button class="chev" data-close-match="${esc(m.id)}" aria-label="Detayı kapat">Kapat ✕</button></div>
     <table><tr><th></th><th>1</th><th>X</th><th>2</th><th>2.5 Üst</th><th>2.5 Alt</th></tr>${row("Maç önü",o.pre)}${row("Canlı",o.live)}</table>
     <div class="pt">${TABS.map(p=>`<button data-per="${p[0]}" class="${p[0]===dper?"on":""}">${p[1]}</button>`).join("")}</div>
     <p class="tot">Toplam şut <b class="mono">${f(T.shots)}</b> · isabetli <b class="mono">${f(T.sot)}</b> · xG <b class="mono">${T.xg==null?"–":T.xg.toFixed(2)}</b> · kırmızı <b class="mono">${f(T.red)}</b></p>
@@ -352,7 +360,7 @@ function rowHtml(m,xl){
   return `<div class="mw"><div class="m" data-om="${esc(m.id)}">
     <div class="min ${lv?"live":""}">${lv?esc(m.minute)+"'":esc(m.status||"–")}</div>
     <div><div class="tm"><span>${esc(m.home)}</span><b class="mono">${esc(m.homeGoals==null?"-":m.homeGoals)}</b></div>
-    <div class="tm"><span>${esc(m.away)}</span><b class="mono">${esc(m.awayGoals==null?"-":m.awayGoals)}</b></div>${xl||""}</div>
+    <div class="tm"><span>${esc(m.away)}</span><b class="mono">${esc(m.awayGoals==null?"-":m.awayGoals)}</b></div>${xl||""}${cmpMiniScores(m.id)}</div>
     <button class="add" data-newm="${esc(m.id)}" aria-label="Bu maça kural ekle">${n?`<i>${n}</i>`:""}＋</button>
   </div>${same(openM,m.id)?detailHtml(m):""}</div>`;
 }
@@ -506,13 +514,25 @@ async function loadLearningItems(type,show=true){
 
 const CMP_SOURCES=["gol-bildirim","claude","gemini"];
 const CMP_LABEL={"gol-bildirim":"Gol Bildirim","claude":"Claude","gemini":"Gemini"};
+let cmpScoresByFixture=new Map();
+function cmpMiniScores(fixtureId){
+  const m=cmpScoresByFixture.get(String(fixtureId));
+  if(!m)return "";
+  const scores=m.scores||{},notified=new Set((m.notifications||[]).map(n=>n.source));
+  return '<div class="cmp-score-grid cmp-match-mini">'+CMP_SOURCES.map(source=>{
+    const v=scores[source]||{},fallback=(m.notifications||[]).find(n=>n.source===source);
+    const score=v.score!=null?cmpScoreText(v):fallback?.source_score!=null?Number(fallback.source_score).toFixed(1).replace(/\\.0$/,"")+"/100":"—";
+    const matchScore=v.home_goals!=null&&v.away_goals!=null?String(v.home_goals)+"–"+String(v.away_goals):"skor yok";
+    return '<div class="cmp-score-cell '+(notified.has(source)?"hit":"")+'"><small>'+CMP_LABEL[source]+'</small><b>'+score+'</b><em>'+matchScore+(notified.has(source)?" · bildirdi":"")+'</em></div>';
+  }).join("")+'</div>';
+}
 function cmpScoreText(v){
   if(!v||v.score==null)return "—";
   const n=Number(v.score);
   return Number.isFinite(n)?n.toFixed(1).replace(/\.0$/,"")+"/100":"—";
 }
 function renderComparisonLive(data){
-  const items=data?.items||[];
+  const items=(data?.items||[]).filter(m=>(m.notifications||[]).length>0);
   $("cmpLiveCount").textContent=items.length+" maç";
   if(!items.length){
     $("cmpLiveList").innerHTML='<p class="empty">Şu anda karşılaştırma merkezinde açık bildirimi bulunan maç yok.</p>';
@@ -547,10 +567,24 @@ async function loadComparisonLive(){
   try{
     const r=await fetch("/api/comparison/live",{headers:H()});
     if(!r.ok)throw new Error(r.status===503?"Karşılaştırma servisi yapılandırılmamış":"Canlı karşılaştırma verisi alınamadı");
-    renderComparisonLive(await r.json());
+    const data=await r.json();
+    cmpScoresByFixture=new Map((data.items||[]).map(m=>[String(m.fixture_id),m]));
+    renderComparisonLive(data);
+    const notified=(data.items||[]).filter(m=>(m.notifications||[]).length>0);
+    $("cmpMatchesCount").textContent=notified.length+" maç";
+    $("cmpMatchesList").innerHTML=notified.length?notified.map(m=>{
+      const sources=new Set((m.notifications||[]).map(n=>n.source));
+      const all=CMP_SOURCES.every(s=>sources.has(s));
+      const minute=Math.max(Number(m.latest_notification_minute)||0,...Object.values(m.scores||{}).map(v=>Number(v?.minute)||0));
+      return '<article class="cmp-match"><div class="cmp-match-top"><div><div class="cmp-teams">'+esc(m.home||"Ev")+' – '+esc(m.away||"Deplasman")+'</div><div class="cmp-meta">'+minute+'\' · '+(m.notifications||[]).length+' bildirim</div></div><span class="cmp-all">'+(all?'✓ 3/3 ALGORİTMA BİLDİRDİ':sources.size+'/3 bildirim')+'</span></div>'+cmpMiniScores(m.fixture_id)+'</article>';
+    }).join(""):'<p class="empty">Şu anda açık bildirimi bulunan maç yok.</p>';
+    if(tab==="m")renderMatches();
+    if(tab==="g")renderGoalAnalysis();
   }catch(e){
     $("cmpLiveCount").textContent="Bağlantı yok";
     $("cmpLiveList").innerHTML='<p class="empty">'+esc(e.message)+'</p>';
+    $("cmpMatchesCount").textContent="Bağlantı yok";
+    $("cmpMatchesList").innerHTML='<p class="empty">'+esc(e.message)+'</p>';
   }
 }
 
@@ -590,13 +624,13 @@ function renderGoalAnalysis(){
     const c=p.context||{},o=p.preOdds||{};
     const status=p.signal?`<span class="ga-signal">GOL SİNYALİ · TELEGRAMA GÖNDERİLDİ</span>`:`<span class="ga-muted">${esc(p.level||"Analiz")}</span>`;
     const probability=p.probability==null?`<div class="ga-prob">Deneysel puan <b>${p.score}/100</b><small>Kalibre edilmiş olasılık modeli için geçmiş veri birikiyor</small></div>`:`<div class="ga-prob">Önümüzdeki 10 dk deneysel tahmin <b>%${p.probability}</b><small>${esc(p.probabilityLabel||"")} · ${p.score}/100 model puanı</small></div>`;
-    return `<article class="ga-card"><div class="ga-top"><div><div class="ga-teams">${esc(m.home)} – ${esc(m.away)}</div><div class="ga-meta">${esc(m.country||"")} · ${esc(m.league||"")} · ${esc(m.minute)}' · Skor ${esc(m.homeGoals)}-${esc(m.awayGoals)}</div></div><div style="text-align:right"><b class="ga-model-score">${p.score}/100</b><div>${status}</div></div></div>${probability}<div class="ga-track"><i style="width:${Math.max(0,Math.min(100,p.score||0))}%"></i></div><div class="ga-details">${comp}<br>Maç önü 1-X-2: ${o.home??"–"} / ${o.draw??"–"} / ${o.away??"–"} · 2.5 Üst: ${o.over25??"–"} · 2.5 Alt: ${o.under25??"–"}<br>2.5 üst piyasa olasılığı: ${p.over25Probability==null?"veri yok":"%"+Math.round(p.over25Probability*100)} · Tahmini toplam gol: ${p.expectedGoals==null?"veri yok":p.expectedGoals}<br>Sıralama: ${c.homeRank??"–"}. / ${c.awayRank??"–"}. · Puan: ${c.homePoints??"–"} / ${c.awayPoints??"–"}<br>İç saha gol ort.: ${c.homeScored??"–"} · İç saha yenilen: ${c.homeConceded??"–"} · Deplasman gol ort.: ${c.awayScored??"–"} · Deplasman yenilen: ${c.awayConceded??"–"}<br>Form: ${esc(c.homeForm||"–")} / ${esc(c.awayForm||"–")} · Veri kapsamı: %${p.coverage??0} · Etiketlenmiş eğitim örneği: ${p.training?.labelledSamples??0}<br>Ceza sahası içi/dışı şut: ${p.features?.insideShots??"–"} / ${p.features?.outsideShots??"–"} · İç saha şut oranı: ${p.features?.insideRatio==null?"veri yok":"%"+Math.round(p.features.insideRatio*100)}<br>Son 10 dk faul: ${p.features?.fouls??"–"} · Faul tempo etkisi: -${p.features?.foulPenalty??0} · Dış şut etkisi: -${p.features?.outsidePenalty??0}<br>Kırmızı kart: Ev ${p.features?.redHome??0} / Dep ${p.features?.redAway??0} · Gerideyken 60+ değişiklik: ${p.features?.trailingSubCount??0} · Değişiklik sonrası baskı: ${p.features?.postSubPressure??"henüz ölçülemedi"}<br>Son 15 dk gol yeme (sezon 76–90, maç başına): Ev ${c.homeLateConceded??"–"} / Dep ${c.awayLateConceded??"–"}<br>Sonraki golü atmaya daha yakın taraf: <b>${esc(p.nextGoal?.label||"Belirsiz")}</b> · ${esc(p.nextGoal?.reason||"Canlı veri bekleniyor")} · Canlı kanıt: Ev ${p.nextGoal?.homeEvidence??0}/4, Dep ${p.nextGoal?.awayEvidence??0}/4 · Fark ${p.nextGoal?.margin??0}<br>Son gol: ${p.features?.latestGoalSide==="home"?esc(m.home):p.features?.latestGoalSide==="away"?esc(m.away):"–"} · Golden sonra geçen süre: ${p.features?.minutesSinceGoal??"–"} dk · Skor koruma değişikliği: ${p.features?.scoreProtectSub?"Olası":"Tespit edilmedi"}<br>Gol sonrası dönem (${p.features?.afterGoalPeriodFrom??"–"}'): Ev ${p.features?.afterGoalHomeShots??"–"} şut · Dep ${p.features?.afterGoalAwayShots??"–"} şut<br>Kırmızı kart sonrası dönem (${p.features?.afterRedPeriodFrom??"–"}'): Ev ${p.features?.afterRedHomeShots??"–"} şut · Dep ${p.features?.afterRedAwayShots??"–"} şut · ${p.features?.redTransition?"İlk 5 dk geçiş dönemi":"Normal değerlendirme"}<br>Canlı 2.5 Üst/Alt: ${p.liveOddsLines?.["2.5"]?.over??"oran yok"} / ${p.liveOddsLines?.["2.5"]?.under??"oran yok"} · 3.5: ${p.liveOddsLines?.["3.5"]?.over??"–"} / ${p.liveOddsLines?.["3.5"]?.under??"–"} · 4.5: ${p.liveOddsLines?.["4.5"]?.over??"–"} / ${p.liveOddsLines?.["4.5"]?.under??"–"}<br>Gol sonrası baskı: Ev ${p.features?.postGoalHomePressure??"–"}/100 · Dep ${p.features?.postGoalAwayPressure??"–"}/100</div></article>`;
+    return `<article class="ga-card"><div class="ga-top"><div><div class="ga-teams">${esc(m.home)} – ${esc(m.away)}</div><div class="ga-meta">${esc(m.country||"")} · ${esc(m.league||"")} · ${esc(m.minute)}' · Skor ${esc(m.homeGoals)}-${esc(m.awayGoals)}</div></div><div style="text-align:right"><b class="ga-model-score">${p.score}/100</b><div>${status}</div></div></div>${probability}${cmpMiniScores(m.id)}<div class="ga-track"><i style="width:${Math.max(0,Math.min(100,p.score||0))}%"></i></div><div class="ga-details">${comp}<br>Maç önü 1-X-2: ${o.home??"–"} / ${o.draw??"–"} / ${o.away??"–"} · 2.5 Üst: ${o.over25??"–"} · 2.5 Alt: ${o.under25??"–"}<br>2.5 üst piyasa olasılığı: ${p.over25Probability==null?"veri yok":"%"+Math.round(p.over25Probability*100)} · Tahmini toplam gol: ${p.expectedGoals==null?"veri yok":p.expectedGoals}<br>Sıralama: ${c.homeRank??"–"}. / ${c.awayRank??"–"}. · Puan: ${c.homePoints??"–"} / ${c.awayPoints??"–"}<br>İç saha gol ort.: ${c.homeScored??"–"} · İç saha yenilen: ${c.homeConceded??"–"} · Deplasman gol ort.: ${c.awayScored??"–"} · Deplasman yenilen: ${c.awayConceded??"–"}<br>Form: ${esc(c.homeForm||"–")} / ${esc(c.awayForm||"–")} · Veri kapsamı: %${p.coverage??0} · Etiketlenmiş eğitim örneği: ${p.training?.labelledSamples??0}<br>Ceza sahası içi/dışı şut: ${p.features?.insideShots??"–"} / ${p.features?.outsideShots??"–"} · İç saha şut oranı: ${p.features?.insideRatio==null?"veri yok":"%"+Math.round(p.features.insideRatio*100)}<br>Son 10 dk faul: ${p.features?.fouls??"–"} · Faul tempo etkisi: -${p.features?.foulPenalty??0} · Dış şut etkisi: -${p.features?.outsidePenalty??0}<br>Kırmızı kart: Ev ${p.features?.redHome??0} / Dep ${p.features?.redAway??0} · Gerideyken 60+ değişiklik: ${p.features?.trailingSubCount??0} · Değişiklik sonrası baskı: ${p.features?.postSubPressure??"henüz ölçülemedi"}<br>Son 15 dk gol yeme (sezon 76–90, maç başına): Ev ${c.homeLateConceded??"–"} / Dep ${c.awayLateConceded??"–"}<br>Sonraki golü atmaya daha yakın taraf: <b>${esc(p.nextGoal?.label||"Belirsiz")}</b> · ${esc(p.nextGoal?.reason||"Canlı veri bekleniyor")} · Canlı kanıt: Ev ${p.nextGoal?.homeEvidence??0}/4, Dep ${p.nextGoal?.awayEvidence??0}/4 · Fark ${p.nextGoal?.margin??0}<br>Son gol: ${p.features?.latestGoalSide==="home"?esc(m.home):p.features?.latestGoalSide==="away"?esc(m.away):"–"} · Golden sonra geçen süre: ${p.features?.minutesSinceGoal??"–"} dk · Skor koruma değişikliği: ${p.features?.scoreProtectSub?"Olası":"Tespit edilmedi"}<br>Gol sonrası dönem (${p.features?.afterGoalPeriodFrom??"–"}'): Ev ${p.features?.afterGoalHomeShots??"–"} şut · Dep ${p.features?.afterGoalAwayShots??"–"} şut<br>Kırmızı kart sonrası dönem (${p.features?.afterRedPeriodFrom??"–"}'): Ev ${p.features?.afterRedHomeShots??"–"} şut · Dep ${p.features?.afterRedAwayShots??"–"} şut · ${p.features?.redTransition?"İlk 5 dk geçiş dönemi":"Normal değerlendirme"}<br>Canlı 2.5 Üst/Alt: ${p.liveOddsLines?.["2.5"]?.over??"oran yok"} / ${p.liveOddsLines?.["2.5"]?.under??"oran yok"} · 3.5: ${p.liveOddsLines?.["3.5"]?.over??"–"} / ${p.liveOddsLines?.["3.5"]?.under??"–"} · 4.5: ${p.liveOddsLines?.["4.5"]?.over??"–"} / ${p.liveOddsLines?.["4.5"]?.under??"–"}<br>Gol sonrası baskı: Ev ${p.features?.postGoalHomePressure??"–"}/100 · Dep ${p.features?.postGoalAwayPressure??"–"}/100</div></article>`;
   }).join("");
   const pressureCards=scored.map(m=>{
     const a=m.goalAnalysis||{},w10=a.w10,w15=a.w15;
     const best=Math.max(w10?.score||0,w15?.score||0);
     const metricRows=(w)=>Object.entries(w?.metrics||{}).filter(([,v])=>v&&v.total!=null).map(([k,v])=>`${esc(v.label)} ${Number(v.total).toFixed(2)}`).join(" · ");
-    return `<article class="ga-card"><div class="ga-top"><div><div class="ga-teams">${esc(m.home)} – ${esc(m.away)}</div><div class="ga-meta">${esc(m.minute)}' · Skor ${esc(m.homeGoals)}-${esc(m.awayGoals)}</div></div><span class="mono" style="color:var(--accent);font-weight:700">${best}/100</span></div><div class="ga-scores">${gaWindowHtml("Son 10 dk baskısı",w10)}${gaWindowHtml("Son 15 dk baskısı",w15)}</div><div class="ga-details">10 dk verisi: ${metricRows(w10)||"Henüz ölçülebilir veri yok"}<br>15 dk verisi: ${metricRows(w15)||"Henüz ölçülebilir veri yok"}</div></article>`;
+    return `<article class="ga-card"><div class="ga-top"><div><div class="ga-teams">${esc(m.home)} – ${esc(m.away)}</div><div class="ga-meta">${esc(m.minute)}' · Skor ${esc(m.homeGoals)}-${esc(m.awayGoals)}</div></div><span class="mono" style="color:var(--accent);font-weight:700">${best}/100</span></div>${cmpMiniScores(m.id)}<div class="ga-scores">${gaWindowHtml("Son 10 dk baskısı",w10)}${gaWindowHtml("Son 15 dk baskısı",w15)}</div><div class="ga-details">10 dk verisi: ${metricRows(w10)||"Henüz ölçülebilir veri yok"}<br>15 dk verisi: ${metricRows(w15)||"Henüz ölçülebilir veri yok"}</div></article>`;
   }).join("");
   const waiting=live.length-predictions.length;
   $("pg").innerHTML=summary+`<h3 class="ga-section-title">Bütünleşik gol tahmini</h3>`+(modelCards||`<div class="ga-empty">Canlı maç bağlamı ve istatistikleri bekleniyor.</div>`)+(waiting?`<p class="mute">${waiting} maçta henüz yeterli analiz verisi bulunmuyor. Oran, puan durumu ve takım profilleri arka planda tamamlanıyor.</p>`:"")+`<h3 class="ga-section-title">Canlı hücum baskısı</h3>`+(pressureCards||`<div class="ga-empty">Son 10/15 dakika istatistikleri henüz birikmedi.</div>`);
@@ -659,7 +693,7 @@ document.addEventListener("input",e=>{
   r[d.f]=t.value;
 });
 document.addEventListener("click",e=>{
-  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om],[data-per],[data-fdel],[data-adel],[data-dfilter],[data-dmatch],[data-learning-type],#learnRefresh,#fbtn,#faddc,#fclear,#fapply,#andbtn,#andtoggle,#andaddc,#andclear,#andapply,#dashRefresh");
+  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om],[data-per],[data-fdel],[data-adel],[data-dfilter],[data-dmatch],[data-learning-type],[data-close-match],#learnRefresh,#fbtn,#faddc,#fclear,#fapply,#andbtn,#andtoggle,#andaddc,#andclear,#andapply,#dashRefresh");
   if(!b)return;const d=b.dataset;
   if(b.id==="andbtn"){andOpen=!andOpen;renderAndFilter();return}
   if(b.id==="andtoggle"){
@@ -679,7 +713,11 @@ document.addEventListener("click",e=>{
     andFlt.on=true;saveAndFlt();andOpen=false;fres=null;render();loadFilter();return;
   }
   if(d.adel!==undefined){andFlt.conditions.splice(d.adel,1);saveAndFlt();renderAndFilter();return}
-  if(d.learningType){learningType=d.learningType;renderLearningBaseline();loadLearningItems(learningType);return}
+  if(d.closeMatch!==undefined){openM=null;renderMatches();return}
+  if(d.learningType){
+    if(learningType===d.learningType&&!$("learnDetail").hidden){learningType=null;$("learnDetail").hidden=true;$("learnDetail").innerHTML="";return}
+    learningType=d.learningType;renderLearningBaseline();loadLearningItems(learningType);return
+  }
   if(b.id==="learnRefresh"){renderLearningBaseline();return}
   if(d.dfilter){dashFilter=d.dfilter;renderDashboard();return}
   if(d.dmatch!==undefined){dashOpen=dashOpen===d.dmatch?null:d.dmatch;renderDashboard();return}
@@ -737,6 +775,7 @@ async function loadMatches(){
   status();
   if(tab==="m")renderMatches();
   if(tab==="g")renderGoalAnalysis();
+  if((tab==="m"||tab==="g")&&active)loadComparisonLive();
   if(openM&&active)loadDetail(openM);
   if((flt.on||andFlt.on)&&active)loadFilter();
   if(tab==="d")loadDashboard();

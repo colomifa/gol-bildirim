@@ -834,8 +834,8 @@ async function poll() {
     // Gol dakikası gereken kurallar için olay verisi; yalnızca skor değiştiğinde.
     const otherTasks = [];
     const profileTasks = [];
-    let profileBudget = 2;
-    let preBudget = 1, eventBudget = 5;
+    let profileBudget = 1;
+    let preBudget = 1, eventBudget = 1;
     for (const m of all) {
       if (!m.inPlay) continue;
       const x = extra.get(m.id) || {};

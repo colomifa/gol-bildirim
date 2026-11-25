@@ -711,7 +711,7 @@ function updateTraining(m, x, prediction, now) {
     const currentGoalCount = Array.isArray(x.goals) ? x.goals.length : totalGoals;
     const signalKey = `${m.id}:${currentGoalCount}`;
     const latestForDecision = Array.isArray(x.goals) && x.goals.length ? Math.max(...x.goals.map(g => Number(g.minute) || 0)) : 0;
-    const afterGoalSettledForDecision = !latestForDecision || Number(m.minute) - latestForDecision >= 2;
+    const afterGoalSettledForDecision = !latestForDecision || Number(m.minute) - latestForDecision >= 10;
     const decisionEligible = canSendGoalAlert(m.short, m.minute);
     const decisionWouldAlert = !!prediction.signal && decisionEligible && afterGoalSettledForDecision && !modelStore.sentSignals[signalKey];
     modelStore.samples.push({
@@ -914,8 +914,10 @@ async function poll() {
     for (const m of playing) {
       const x = extra.get(m.id) || {};
       const S = x.stats;
+      const latestGoalMinuteForRules = Array.isArray(x.goals) && x.goals.length ? Math.max(...x.goals.map(g => Number(g.minute) || 0)) : 0;
+      const afterGoalSettledForRules = !latestGoalMinuteForRules || Number(m.minute) - latestGoalMinuteForRules >= 10;
       const relevant = rules.filter((r) => !r.matchId || String(r.matchId) === String(m.id));
-      if (!relevant.length || !canSendGoalAlert(m.short, m.minute)) continue;
+      if (!relevant.length || !canSendGoalAlert(m.short, m.minute) || !afterGoalSettledForRules) continue;
       const homeXg = S?.all?.xg?.home;
       const awayXg = S?.all?.xg?.away;
       const homeHasXg = homeXg !== null && homeXg !== undefined && Number.isFinite(Number(homeXg));
@@ -969,7 +971,7 @@ async function poll() {
       const currentGoalCount = Array.isArray(x.goals) ? x.goals.length : ((Number(m.homeGoals)||0)+(Number(m.awayGoals)||0));
       const signalKey = `${m.id}:${currentGoalCount}`;
       const latestGoalMinute = Array.isArray(x.goals) && x.goals.length ? Math.max(...x.goals.map(g => Number(g.minute)||0)) : 0;
-      const afterGoalSettled = !latestGoalMinute || Number(m.minute) - latestGoalMinute >= 2;
+      const afterGoalSettled = !latestGoalMinute || Number(m.minute) - latestGoalMinute >= 10;
       if (prediction.signal && canSendGoalAlert(m.short, m.minute) && afterGoalSettled && !modelStore.sentSignals[signalKey]) {
         await safe(async () => {
           // Canlı oranı yalnızca gerçek sinyal anında sorgula; gereksiz API tüketimini önle.

@@ -503,7 +503,7 @@ function renderDashboard(){
       const ownScore=n.signalScore??n.score;
       const otherScores=CMP_SOURCES.filter(s=>s!=="gol-bildirim").map(s=>{const v=scores[s];return scoreLine(CMP_LABEL[s],v?.score);}).join("");
       return `<div class="dash-notif"><div class="dn-rule">${esc(n.ruleName||"Bildirim")} · ${Number(n.minute)||"—"}' · ${new Date(n.sentAt).toLocaleTimeString("tr-TR")}</div><div class="dn-time"><span class="result-tag ${result.cls}">${result.label}</span></div><div class="dn-sub">${scoreLine("Gol Bildirim",ownScore)} ${otherScores}</div><div class="dn-sub">Bildirim skoru: ${scoreText(n.scoreAt)} · Son skor: ${scoreText(n.finalScore||n.currentScore)}</div></div>`;
-    }).join("")}</div>":"";
+    }).join("")}</div>`:"";
     rows.push({time:latest.sentAt,html:`<div class="dash-match"><button data-dmatch="${esc(key)}"><div><div class="dm-teams">${esc(g.home)} – ${esc(g.away)}</div><div class="dm-meta">${esc(g.country||"")} · ${esc(g.league||"")} · ${g.items.length} bildirim</div><div class="dn-sub">${previews}</div></div><b class="dm-score">${scoreText(final||latest.currentScore||latest.scoreAt)} ${final?'<span style="color:var(--ok);font-size:10px">MS</span>':'<span style="color:var(--accent);font-size:10px">BEKLİYOR</span>'}</b></button>${detail}</div>`});
   });
   cmpSource.forEach(m=>{
@@ -519,7 +519,7 @@ function renderDashboard(){
       const own=scores["gol-bildirim"]?.score;
       const sourceScore=n.score??n.source_score??scores[n.source]?.score;
       return `<div class="dash-notif"><div class="dn-rule">${esc(CMP_LABEL[n.source]||n.source||"Kaynak")} bildirimi · ${Number(n.minute)||"—"}' · ${esc(n.notified_at||"")}</div><div class="dn-time"><span class="result-tag ${result.cls}">${result.label}</span></div><div class="dn-sub">${scoreLine("Gol Bildirim",own)} ${scoreLine(CMP_LABEL[n.source]||n.source||"Kaynak",sourceScore)}</div><div class="dn-sub">Bildirim anı skoru: ${scoreText(n.score_at||n.scoreAt)} · Maç sonu: ${sc?scoreText(sc):"bekleniyor"}</div></div>`;
-    }).join("")}</div>":"";
+    }).join("")}</div>`:"";
     rows.push({time:Math.max(...notices.map(n=>new Date(n.notified_at||0).getTime()||0)),html:`<div class="dash-match"><button data-dmatch="${esc(key)}"><div><div class="dm-teams">${esc(m.home||"Ev")} – ${esc(m.away||"Deplasman")}</div><div class="dm-meta">${esc(m.league||"")} · ${notices.length} bildirim</div><div class="dn-sub">${previews}</div></div><b class="dm-score">${sc?scoreText(sc):"Skor bekleniyor"} <span style="color:var(--${finished?"ok":"accent"});font-size:10px">${finished?"MS":"BEKLİYOR"}</span></b></button>${detail}</div>`});
   });
   rows.sort((a,b)=>b.time-a.time);

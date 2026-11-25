@@ -67,6 +67,29 @@ CREATE INDEX IF NOT EXISTS idx_algorithm_notifications_fixture
 `;
 
 await pool.query(schema);
+await pool.query(`
+CREATE TABLE IF NOT EXISTS telegram_consensus_events (
+  id BIGSERIAL PRIMARY KEY,
+  source TEXT NOT NULL,
+  fixture_id TEXT NOT NULL,
+  notification_id TEXT NOT NULL,
+  home TEXT,
+  away TEXT,
+  minute INTEGER,
+  message TEXT NOT NULL,
+  notified_at TIMESTAMPTZ NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  UNIQUE (source, notification_id)
+);
+CREATE INDEX IF NOT EXISTS idx_telegram_consensus_window
+  ON telegram_consensus_events (fixture_id, notified_at DESC);
+CREATE TABLE IF NOT EXISTS telegram_consensus_deliveries (
+  id BIGSERIAL PRIMARY KEY,
+  consensus_key TEXT NOT NULL UNIQUE,
+  fixture_id TEXT NOT NULL,
+  created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+`);
 
 function auth(req, res, next) {
   const supplied = String(req.headers.authorization || "").replace(/^Bearer\s+/i, "");
@@ -277,6 +300,55 @@ app.get("/v1/live-notifications", async (_req, res) => {
     console.error("live notifications query:", e.message);
     res.status(500).json({ error: "database_error" });
   }
+});
+
+
+app.post("/v1/telegram-consensus", async (req, res) => {
+  const b = req.body || {};
+  if (!validSource(b.source) || !b.fixture_id || !b.notification_id || !b.message) {
+    return res.status(400).json({ error: "source, fixture_id, notification_id ve message gerekli" });
+  }
+  const notifiedAt = asDate(b.notified_at);
+  if (!notifiedAt) return res.status(400).json({ error: "notified_at geçersiz" });
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query("SELECT pg_advisory_xact_lock(hashtext($1))", [String(b.fixture_id)]);
+    await client.query(`
+      INSERT INTO telegram_consensus_events
+        (source, fixture_id, notification_id, home, away, minute, message, notified_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
+      ON CONFLICT (source, notification_id) DO NOTHING
+    `, [b.source, String(b.fixture_id), String(b.notification_id), b.home || null, b.away || null,
+      Number.isFinite(Number(b.minute)) ? Number(b.minute) : null, String(b.message).slice(0, 3500), notifiedAt]);
+    const q = await client.query(`
+      SELECT DISTINCT ON (source) source, notification_id, home, away, minute, message, notified_at
+      FROM telegram_consensus_events
+      WHERE fixture_id=$1 AND notified_at BETWEEN $2::timestamptz - INTERVAL '2 minutes' AND $2::timestamptz
+      ORDER BY source, notified_at DESC
+    `, [String(b.fixture_id), notifiedAt]);
+    const bySource = new Map(q.rows.map(row => [row.source, row]));
+    const ready = SOURCES.size === bySource.size && [...SOURCES].every(source => bySource.has(source));
+    let messages = [];
+    let delivered = false;
+    if (ready) {
+      const selected = [...SOURCES].map(source => bySource.get(source)).sort((a,b) => a.source.localeCompare(b.source));
+      const key = selected.map(row => `${row.source}:${row.notification_id}`).join("|");
+      const inserted = await client.query(`
+        INSERT INTO telegram_consensus_deliveries (consensus_key, fixture_id)
+        VALUES ($1,$2) ON CONFLICT (consensus_key) DO NOTHING RETURNING id
+      `, [key, String(b.fixture_id)]);
+      delivered = inserted.rowCount === 1;
+      if (delivered) messages = selected.map(row => `[${row.source.toUpperCase()}] ${row.message}`);
+    }
+    await client.query("COMMIT");
+    res.json({ ok: true, ready, delivered, source_count: bySource.size, required: SOURCES.size,
+      messages, sources: [...bySource.keys()] });
+  } catch (e) {
+    await client.query("ROLLBACK");
+    console.error("telegram consensus:", e.message);
+    res.status(500).json({ error: "consensus_error" });
+  } finally { client.release(); }
 });
 
 app.listen(PORT, () => console.log(`Algorithm comparison collector listening on ${PORT}`));

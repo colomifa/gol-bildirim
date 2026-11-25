@@ -619,7 +619,7 @@ function syncNotificationLiveState() {
 async function updateFinalScores() {
   const unresolvedSamples = modelStore.samples.filter(v => v.y === null && v.fixtureId && v.targetMinute != null);
   const pending = [...new Set([
-    ...notifications.filter((n) => !n.finalScore).map((n) => String(n.fixtureId)),
+    ...notifications.filter((n) => !FINISHED.has(String(n.finalStatus || n.status || "").toUpperCase())).map((n) => String(n.fixtureId)),
     ...unresolvedSamples.map(v => String(v.fixtureId)),
   ])];
   if (!pending.length) return;
@@ -634,11 +634,14 @@ async function updateFinalScores() {
       const finalScore = { home: f.goals?.home ?? null, away: f.goals?.away ?? null };
       const id = String(f.fixture.id);
       for (const n of notifications) {
-        if (String(n.fixtureId) !== id || n.finalScore) continue;
+        if (String(n.fixtureId) !== id) continue;
+        const wasChanged = !n.finalScore || n.finalStatus !== status || n.status !== status;
         n.finalScore = finalScore;
         n.finalStatus = status;
-        n.finishedAt = Date.now();
-        changed = true;
+        n.status = status;
+        n.finishedAt = n.finishedAt || Date.now();
+        if (wasChanged) changed = true;
+        recordComparisonMatchState(n);
       }
       // Maç bittikten sonra hâlâ etiketsiz kalan başlangıç ölçümü örneklerini
       // maç olaylarından kesin gol dakikalarıyla tamamla.

@@ -325,7 +325,7 @@ function status(){
   $("act").textContent=active?"● AKTİF":"○ PASİF";
   $("act").className="pill"+(active?"":" off");
   $("note").hidden=active;
-  $("nm").textContent=matches.length;$("nr").textContent=rules.length;
+  $("nr").textContent=rules.length;
 }
 
 // ---- Ortak koşul düzenleyici (kurallar ve filtre) ----

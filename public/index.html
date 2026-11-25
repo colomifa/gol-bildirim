@@ -468,21 +468,32 @@ function groupedNotifs(items){
 function renderDashboard(){
   renderLearningBaseline();
   if(!dashData){$("dashList").innerHTML='<p class="empty">Bildirim geçmişi yükleniyor...</p>';return}
-  const c=dashData.counts||{};
-  const cards=[["all","Gönderilen bildirim",c.notifications||0,"Bildirim kayıtları"],["matches","Bildirimli maç",c.matches||0,"Tekil maç sayısı"],["finished","Tamamlanan maç",c.finished||0,"Nihai skoru gelen"],["pending","Sonucu beklenen",c.pending||0,"Henüz tamamlanmayan"]];
+  const allOwn=dashData.allItems||[];
+  const cmpAll=[...cmpScoresByFixture.values()].filter(m=>(m.notifications||[]).length>0);
+  const isFinished=m=>!!(m.finished||m.final_score||m.finalScore||/FT|AET|PEN|FINISHED|FULL.?TIME/i.test(String(m.status||m.match_status||""))||Object.values(m.scores||{}).some(v=>/FT|AET|PEN|FINISHED|FULL.?TIME/i.test(String(v?.match_status||v?.status||""))));
+  const cmpFinished=cmpAll.filter(isFinished),cmpPending=cmpAll.filter(m=>!isFinished(m));
+  const ownFinished=allOwn.filter(n=>n.finalScore),ownPending=allOwn.filter(n=>!n.finalScore);
+  const ownSource=dashFilter==="finished"?ownFinished:dashFilter==="pending"?ownPending:allOwn;
+  const cmpSource=dashFilter==="finished"?cmpFinished:dashFilter==="pending"?cmpPending:cmpAll;
+  const ownGroups=groupedNotifs(ownSource);
+  const cards=[
+    ["all","Gönderilen bildirim",allOwn.length+cmpAll.reduce((a,m)=>a+(m.notifications||[]).length,0),"Bildirim kayıtları"],
+    ["matches","Bildirimli maç",new Set([...allOwn.map(n=>String(n.fixtureId)),...cmpAll.map(m=>String(m.fixture_id))]).size,"Tekil maç sayısı"],
+    ["finished","Tamamlanan maç",new Set([...ownFinished.map(n=>String(n.fixtureId)),...cmpFinished.map(m=>String(m.fixture_id))]).size,"Nihai skoru gelen"],
+    ["pending","Sonucu beklenen",new Set([...ownPending.map(n=>String(n.fixtureId)),...cmpPending.map(m=>String(m.fixture_id))]).size,"Henüz tamamlanmayan"]
+  ];
   $("dashCards").innerHTML=cards.map(x=>`<button class="dash-card ${dashFilter===x[0]?"on":""}" data-dfilter="${x[0]}"><small>${x[1]}</small><strong>${x[2]}</strong><em>${x[3]}</em></button>`).join("");
-  const ownFinished=(dashData.allItems||[]).filter(n=>n.finalScore),ownGroups=groupedNotifs(ownFinished);
-  const otherFinished=[...cmpScoresByFixture.values()].filter(m=>{const scores=Object.values(m.scores||{});return !!(m.finished||m.final_score||m.finalScore||/FT|AET|PEN|FINISHED|FULL.?TIME/i.test(String(m.status||m.match_status||""))||scores.some(v=>/FT|AET|PEN|FINISHED|FULL.?TIME/i.test(String(v?.match_status||v?.status||""))))});
-  if(dashFilter==="finished"){
-    const ownHtml=ownGroups.map(g=>{const latest=[...g.items].sort((a,b)=>b.sentAt-a.sentAt)[0],opened=dashOpen===g.id;return `<div class="dash-match"><button data-dmatch="${esc(g.id)}"><div><div class="dm-teams">${esc(g.home)} – ${esc(g.away)}</div><div class="dm-meta">${esc(g.country||"")} · ${esc(g.league||"")} · ${g.items.length} bildirim</div></div><b class="dm-score">${scoreText(latest.finalScore)} <span style="color:var(--ok);font-size:10px">MS</span></b></button>${opened?`<div class="dash-notifs">${g.items.map(n=>`<div class="dash-notif"><span class="dn-rule">${esc(n.ruleName||"Bildirim")}</span><span class="dn-time">${new Date(n.sentAt).toLocaleTimeString("tr-TR")}</span><span class="dn-sub">Bildirim anı: ${scoreText(n.scoreAt)} · Maç sonu: ${scoreText(n.finalScore)}</span></div>`).join("")}</div>`:""}</div>`}).join("")||'<p class="empty">Tamamlanan kendi bildirimli maçın yok.</p>';
-    const otherHtml=otherFinished.map(m=>{const notices=m.notifications||[],scores=m.scores||{},id=String(m.fixture_id),opened=dashOpen==="other:"+id;const score=m.final_score||m.finalScore||Object.values(scores).map(v=>v?.home_goals!=null&&v?.away_goals!=null?`${v.home_goals} – ${v.away_goals}`:null).find(Boolean)||"Skor yok";return `<div class="dash-match"><button data-dmatch="other:${esc(id)}"><div><div class="dm-teams">${esc(m.home||"Ev")} – ${esc(m.away||"Deplasman")}</div><div class="dm-meta">Diğer projeler · ${notices.length} bildirim</div></div><b class="dm-score">${esc(typeof score==="object"?scoreText(score):score)} <span style="color:var(--ok);font-size:10px">MS</span></b></button>${opened?`<div class="dash-notifs">${notices.map(n=>`<div class="dash-notif"><span class="dn-rule">${esc(CMP_LABEL[n.source]||n.source||"Diğer proje")}</span><span class="dn-time">${esc(n.minute??"–")}' · ${esc(n.notified_at||"")}</span><span class="dn-sub">Bildirim anı skoru: ${esc(scoreText(n.score_at||n.scoreAt))}</span></div>`).join("")}</div>`:""}</div>`}).join("")||'<p class="empty">Diğer projelerden tamamlanmış maç kaydı bulunmuyor.</p>';
-    $("dashTitle").textContent="Tamamlanan maçlar";
-    $("dashList").innerHTML=`<section><button class="dash-toolbar" data-finished-group="own" style="width:100%;text-align:left"><h3>Benim gönderdiğim bildirimler · ${ownGroups.length} maç</h3><span>${finishedOwnOpen?"▾":"▸"}</span></button><div ${finishedOwnOpen?"":"hidden"}>${ownHtml}</div></section><section><button class="dash-toolbar" data-finished-group="other" style="width:100%;text-align:left"><h3>Diğer projelerden gelen bildirimler · ${otherFinished.length} maç</h3><span>${finishedOtherOpen?"▾":"▸"}</span></button><div ${finishedOtherOpen?"":"hidden"}>${otherHtml}</div></section>`;return;
-  }
-  const source=dashFilter==="pending"?(dashData.allItems||[]).filter(n=>!n.finalScore):(dashData.allItems||[]),groups=groupedNotifs(source);
-  $("dashTitle").textContent=dashFilter==="pending"?"Sonucu beklenen maçlar":"Bildirim gönderilen maçlar";
-  if(!groups.length){$("dashList").innerHTML='<p class="empty">Bu tarih ve seçime ait bildirim bulunmuyor.</p>';return}
-  $("dashList").innerHTML=groups.map(g=>{const opened=dashOpen===g.id,latest=[...g.items].sort((a,b)=>b.sentAt-a.sentAt)[0],final=latest.finalScore,score=final||latest.currentScore||latest.scoreAt;return `<div class="dash-match"><button data-dmatch="${esc(g.id)}"><div><div class="dm-teams">${esc(g.home)} – ${esc(g.away)}</div><div class="dm-meta">${esc(g.country||"")} · ${esc(g.league||"")} · ${g.items.length} bildirim</div></div><div class="dm-score">${scoreText(score)} ${final?'<span style="color:var(--ok);font-size:10px">MS</span>':'<span style="color:var(--accent);font-size:10px">CANLI</span>'}</div></button>${opened?`<div class="dash-notifs">${g.items.map(n=>`<div class="dash-notif"><span class="dn-rule">${esc(n.ruleName||"Bildirim")}</span><span class="dn-time">${new Date(n.sentAt).toLocaleTimeString("tr-TR")}</span><span class="dn-sub">Bildirim anı: ${scoreText(n.scoreAt)} · Güncel: ${scoreText(n.currentScore)}</span></div>`).join("")}</div>`:""}</div>`}).join("");
+  const ownHtml=ownGroups.map(g=>{
+    const latest=[...g.items].sort((a,b)=>b.sentAt-a.sentAt)[0],key="own:"+g.id,opened=dashOpen===key,final=latest.finalScore;
+    return `<div class="dash-match"><button data-dmatch="${esc(key)}"><div><div class="dm-teams">${esc(g.home)} – ${esc(g.away)}</div><div class="dm-meta">${esc(g.country||"")} · ${esc(g.league||"")} · ${g.items.length} bildirim</div></div><b class="dm-score">${scoreText(final||latest.currentScore||latest.scoreAt)} ${final?'<span style="color:var(--ok);font-size:10px">MS</span>':'<span style="color:var(--accent);font-size:10px">BEKLİYOR</span>'}</b></button>${opened?`<div class="dash-notifs">${g.items.map(n=>`<div class="dash-notif"><span class="dn-rule">${esc(n.ruleName||"Bildirim")}</span><span class="dn-time">${new Date(n.sentAt).toLocaleTimeString("tr-TR")}</span><span class="dn-sub">Bildirim anı: ${scoreText(n.scoreAt)} · Güncel: ${scoreText(n.currentScore)} · Maç sonu: ${scoreText(n.finalScore)}</span></div>`).join("")}</div>`:""}</div>`;
+  }).join("")||'<p class="empty">Bu seçimde kendi bildirim kaydı yok.</p>';
+  const otherHtml=cmpSource.map(m=>{
+    const notices=m.notifications||[],id=String(m.fixture_id),key="other:"+id,opened=dashOpen===key,finished=isFinished(m);
+    const sc=m.final_score||m.finalScore||Object.values(m.scores||{}).map(v=>v?.home_goals!=null&&v?.away_goals!=null?{home:v.home_goals,away:v.away_goals}:null).find(Boolean)||null;
+    return `<div class="dash-match"><button data-dmatch="${esc(key)}"><div><div class="dm-teams">${esc(m.home||"Ev")} – ${esc(m.away||"Deplasman")}</div><div class="dm-meta">Diğer projeler · ${notices.length} bildirim</div></div><b class="dm-score">${sc?scoreText(sc):"Skor bekleniyor"} <span style="color:var(--${finished?"ok":"accent"});font-size:10px">${finished?"MS":"BEKLİYOR"}</span></b></button>${opened?`<div class="dash-notifs">${notices.map(n=>`<div class="dash-notif"><span class="dn-rule">${esc(CMP_LABEL[n.source]||n.source||"Diğer proje")}</span><span class="dn-time">${esc(n.minute??"–")}' · ${esc(n.notified_at||"")}</span><span class="dn-sub">Bildirim anı skoru: ${scoreText(n.score_at||n.scoreAt)}</span></div>`).join("")}</div>`:""}</div>`;
+  }).join("")||'<p class="empty">Bu seçimde diğer projelerden bildirim kaydı bulunmuyor.</p>';
+  $("dashTitle").textContent=dashFilter==="finished"?"Tamamlanan maçlar":dashFilter==="pending"?"Sonucu beklenen maçlar":dashFilter==="matches"?"Bildirimli maçlar":"Gönderilen bildirimler";
+  $("dashList").innerHTML=`<section><button class="dash-toolbar" data-finished-group="own" style="width:100%;text-align:left"><h3>Gol Bildirim · ${ownGroups.length} maç</h3><span>${finishedOwnOpen?"▾":"▸"}</span></button><div ${finishedOwnOpen?"":"hidden"}>${ownHtml}</div></section><section><button class="dash-toolbar" data-finished-group="other" style="width:100%;text-align:left"><h3>Diğer projeler · ${cmpSource.length} maç</h3><span>${finishedOtherOpen?"▾":"▸"}</span></button><div ${finishedOtherOpen?"":"hidden"}>${otherHtml}</div></section>`;
 }
 const LEARN_TYPES={correct:["Doğru alarm","Alarm verildi ve hedef pencerede gol oldu"],false_alarm:["Yanlış alarm","Alarm verildi ancak hedef pencerede gol olmadı"],missed:["Kaçırılan gol","Alarm verilmedi ancak hedef pencerede gol oldu"],correct_reject:["Doğru pas geçme","Alarm verilmedi ve hedef pencerede gol olmadı"]};
 async function renderLearningBaseline(){
@@ -696,7 +707,7 @@ document.addEventListener("change",e=>{
   if(e.target.id==="gaSort"){gaSort=e.target.value;renderGoalAnalysis();return;}
 });
 document.addEventListener("click",e=>{
-  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om],[data-per],[data-fdel],[data-adel],[data-dfilter],[data-dmatch],[data-learning-type],[data-close-match],#learnRefresh,#fbtn,#faddc,#fclear,#fapply,#andbtn,#andtoggle,#andaddc,#andclear,#andapply,#dashRefresh");
+  const b=e.target.closest("[data-tab],[data-open],[data-newm],[data-newall],[data-addc],[data-del],[data-delr],[data-save],[data-om],[data-per],[data-fdel],[data-adel],[data-finished-group],[data-dfilter],[data-dmatch],[data-learning-type],[data-close-match],#learnRefresh,#fbtn,#faddc,#fclear,#fapply,#andbtn,#andtoggle,#andaddc,#andclear,#andapply,#dashRefresh");
   if(!b)return;const d=b.dataset;
   if(b.id==="andbtn"){andOpen=!andOpen;renderAndFilter();return}
   if(b.id==="andtoggle"){

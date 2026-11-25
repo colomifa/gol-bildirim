@@ -249,7 +249,7 @@ select,input{background:#fff;color:#26384b;border-color:var(--line)}.ghost{backg
     <div class="dash-toolbar"><h3>Proje karşılaştırması</h3><button id="dashRefresh">Verileri yenile</button></div>
     <div id="projectPerformance" class="project-grid"></div>
     <div class="dash-toolbar"><h3>Bildirim kayıtları</h3><span class="mute" id="dashRecordCount"></span></div>
-    <div class="dash-filters"><select id="sourceFilter"><option value="all">Tüm projeler</option><option value="gol-bildirim">Gol Bildirim</option><option value="claude">Claude</option><option value="gemini">Gemini</option></select><select id="outcomeFilter"><option value="all">Tüm sonuçlar</option><option value="green">10 dk içinde gol</option><option value="yellow">Sonradan gol</option><option value="red">Gol olmadı</option><option value="pending">Sonuç bekleniyor</option></select></div>
+    <div class="dash-filters"><select id="sourceFilter"><option value="all">Tüm projeler</option><option value="gol-bildirim">ChatGPT</option><option value="claude">Claude</option><option value="gemini">Gemini</option></select><select id="outcomeFilter"><option value="all">Tüm sonuçlar</option><option value="green">10 dk içinde gol</option><option value="yellow">Sonradan gol</option><option value="red">Gol olmadı</option><option value="pending">Sonuç bekleniyor</option></select></div>
     <div id="dashList"><p class="empty">Bildirim geçmişi yükleniyor...</p></div>
     <div hidden><div id="learnStatus"></div><div id="learnDay"></div><div id="learnRemaining"></div><div id="learnTrack"></div><div id="learnCards"></div><div id="learnNote"></div><div id="learnDetail"></div><button id="learnRefresh"></button><div id="cmpLiveCount"></div><div id="cmpLiveList"></div><div id="dashTitle"></div></div>
   </div>
@@ -525,7 +525,7 @@ async function loadLearningItems(type,show=true){
 
 const CMP_SOURCES=["gol-bildirim","claude","gemini"];
 let gaLeagueFilter="all",gaSort="pressure";
-const CMP_LABEL={"gol-bildirim":"Gol Bildirim","claude":"Claude","gemini":"Gemini"};
+const CMP_LABEL={"gol-bildirim":"ChatGPT","claude":"Claude","gemini":"Gemini"};
 let cmpScoresByFixture=new Map();
 function cmpMiniScores(fixtureId){
   const m=cmpScoresByFixture.get(String(fixtureId));

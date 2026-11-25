@@ -234,6 +234,7 @@ app.get("/v1/live-notifications", async (_req, res) => {
           COUNT(DISTINCT source)::int AS source_count
         FROM algorithm_goal_notifications
         WHERE UPPER(COALESCE(match_status, 'LIVE')) NOT IN ('FT','AET','PEN','AWD','WO')
+          AND notified_at > NOW() - INTERVAL '4 hours'
         GROUP BY fixture_id
       ),
       latest_scores AS (
@@ -246,6 +247,7 @@ app.get("/v1/live-notifications", async (_req, res) => {
       active_fixtures AS (
         SELECT DISTINCT fixture_id FROM latest_scores
         WHERE UPPER(COALESCE(match_status, 'LIVE')) NOT IN ('FT','AET','PEN','AWD','WO')
+          AND captured_at > NOW() - INTERVAL '4 hours'
         UNION
         SELECT fixture_id FROM live_notifications
       )

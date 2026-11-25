@@ -709,6 +709,8 @@ document.addEventListener("input",e=>{
   r[d.f]=t.value;
 });
 document.addEventListener("change",e=>{
+  if(e.target.id==="sourceFilter"){dashboardSourceFilter=e.target.value;renderDashboard();return;}
+  if(e.target.id==="outcomeFilter"){dashboardOutcomeFilter=e.target.value;renderDashboard();return;}
   if(e.target.id==="gaLeagueFilter"){gaLeagueFilter=e.target.value;renderGoalAnalysis();return;}
   if(e.target.id==="gaSort"){gaSort=e.target.value;renderGoalAnalysis();return;}
 });

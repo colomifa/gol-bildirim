@@ -302,7 +302,8 @@ let andFlt;try{andFlt=JSON.parse(localStorage.getItem("andFlt")||"null")}catch{a
 if(!andFlt||!Array.isArray(andFlt.conditions))andFlt={on:false,conditions:[{metric:"home_goals",op:">=",value:1,period:"all"}]};
 let andOpen=false;
 const saveAndFlt=()=>{try{localStorage.setItem("andFlt",JSON.stringify(andFlt))}catch{}};
-let dashData=null,dashFilter="all",dashOpen=null,finishedOwnOpen=false,finishedOtherOpen=false,learningData=null,learningType=null;\nlet dashboardSourceFilter="all",dashboardOutcomeFilter="all";
+let dashData=null,dashFilter="all",dashOpen=null,finishedOwnOpen=false,finishedOtherOpen=false,learningData=null,learningType=null;
+let dashboardSourceFilter="all",dashboardOutcomeFilter="all";
 const saveFlt=()=>{try{localStorage.setItem("flt",JSON.stringify(flt))}catch{}};
 let pw=localStorage.getItem("pw")||prompt("Panel şifresi:");
 const H=()=>({"Content-Type":"application/json","x-password":pw});

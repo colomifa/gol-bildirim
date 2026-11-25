@@ -57,6 +57,36 @@ function recordComparisonMatchState(n) {
 }
 
 
+async function sendConsensusTelegram(match, notificationId, message) {
+  if (!COMPARISON_URL || !COMPARISON_TOKEN) {
+    throw new Error("Üçlü Telegram onayı için COMPARISON_API_URL/TOKEN gerekli; tekil gönderim yapılmadı.");
+  }
+  const response = await fetch(`${COMPARISON_URL}/v1/telegram-consensus`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json", Authorization: `Bearer ${COMPARISON_TOKEN}` },
+    body: JSON.stringify({
+      source: COMPARISON_SOURCE,
+      notification_id: String(notificationId),
+      fixture_id: String(match.id ?? match.fixtureId),
+      home: match.home, away: match.away, minute: Number(match.minute) || 0,
+      message: String(message),
+      notified_at: new Date().toISOString(),
+    }),
+    signal: AbortSignal.timeout(8000),
+  });
+  if (!response.ok) throw new Error(`consensus HTTP ${response.status}`);
+  const result = await response.json();
+  if (result.ready && result.delivered) {
+    const text = ["✅ <b>3/3 PROJE ONAYLADI</b>", ...result.messages].join("\n\n");
+    await sendTelegram(text);
+    console.log("[telegram-consensus] 3/3 onaylandı:", match.home, "-", match.away);
+    return true;
+  }
+  console.log(`[telegram-consensus] Bekleniyor: ${result.source_count}/${result.required}`, match.home, "-", match.away);
+  return false;
+}
+
+
 if (!BOT_TOKEN || !CHAT_ID || !PANEL_PASSWORD) {
   console.error("Eksik ortam değişkeni: BOT_TOKEN, CHAT_ID ve PANEL_PASSWORD gerekli.");
   process.exit(1);
@@ -941,7 +971,7 @@ async function poll() {
       for (const { rule, key } of findTriggered(readyRules, full, fired)) {
         await safe(async () => {
           const sentAt = Date.now();
-          await sendTelegram(formatAlert(full, rule));
+          await sendConsensusTelegram(full, `rule:${key}:${Number(m.minute) || 0}`, formatAlert(full, rule));
           fired[key] = sentAt;
           saveFired();
           addNotification(full, rule, m.minute, sentAt);
@@ -1008,7 +1038,7 @@ async function poll() {
             `⏳ Sezon 76–90 dk gol yeme (maç başına): Ev ${prediction.context.homeLateConceded ?? "–"} / Dep ${prediction.context.awayLateConceded ?? "–"}`,
             `🔎 Veri kapsamı: %${prediction.coverage}`,
           ];
-          await sendTelegram(lines.join("\n"));
+          await sendConsensusTelegram(m, `goal:${signalKey}`, lines.join("\n"));
           addGoalSignalNotification(m, prediction, now, x.goals || [], x.liveOdds || null);
           const comparisonNotification = notifications[notifications.length - 1];
           if (comparisonNotification?.kind === "goal-signal") recordComparisonNotification(comparisonNotification);

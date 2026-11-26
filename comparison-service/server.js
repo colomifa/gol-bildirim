@@ -324,7 +324,7 @@ app.post("/v1/telegram-consensus", async (req, res) => {
     const q = await client.query(`
       SELECT DISTINCT ON (source) source, notification_id, home, away, minute, message, notified_at
       FROM telegram_consensus_events
-      WHERE fixture_id=$1 AND notified_at BETWEEN $2::timestamptz - INTERVAL '2 minutes' AND $2::timestamptz
+      WHERE fixture_id=$1 AND notified_at BETWEEN $2::timestamptz - INTERVAL '5 minutes' AND $2::timestamptz
       ORDER BY source, notified_at DESC
     `, [String(b.fixture_id), notifiedAt]);
     const bySource = new Map(q.rows.map(row => [row.source, row]));
